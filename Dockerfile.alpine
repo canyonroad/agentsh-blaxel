@@ -1,51 +1,43 @@
-# Blaxel Sandbox with agentsh Runtime Security
-# Based on the agentsh-e2b template adapted for Blaxel's sandbox platform
+# Blaxel Sandbox with agentsh Runtime Security (Alpine/musl)
+# Alpine-based variant using musl libc
 
-# Use glibc-based image (agentsh-unixwrap requires glibc)
-FROM node:22-bookworm-slim
+FROM node:22-alpine
 
 # Copy the Blaxel sandbox-api binary (REQUIRED for sandbox functionality)
 COPY --from=ghcr.io/blaxel-ai/sandbox:latest /sandbox-api /usr/local/bin/sandbox-api
 
 # Install required dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apk add --no-cache \
     bash \
     curl \
     git \
     jq \
-    libseccomp2 \
+    libseccomp \
     sudo \
     netcat-openbsd \
     ca-certificates \
-    procps \
-    && rm -rf /var/lib/apt/lists/*
+    procps
 
 # Set agentsh version (use latest stable)
 ARG AGENTSH_VERSION=0.8.10
 
-# Download and install agentsh
-# Use .deb package for Debian-based systems, fall back to tar.gz
+# Download and install agentsh (musl/Alpine version)
+# Note: Only amd64 musl builds are available
 RUN set -eux; \
     ARCH=$(uname -m); \
     case "$ARCH" in \
         x86_64) ARCH_NAME="amd64" ;; \
-        aarch64) ARCH_NAME="arm64" ;; \
-        *) echo "Unsupported architecture: $ARCH" && exit 1 ;; \
+        *) echo "Alpine/musl build only available for amd64, got: $ARCH" && exit 1 ;; \
     esac; \
-    # Try to download .deb first, fall back to tar.gz
-    if curl -fsSL -o /tmp/agentsh.deb "https://github.com/canyonroad/agentsh/releases/download/v${AGENTSH_VERSION}/agentsh_${AGENTSH_VERSION}_linux_${ARCH_NAME}.deb" 2>/dev/null; then \
-        dpkg -i /tmp/agentsh.deb || apt-get install -f -y; \
-        rm /tmp/agentsh.deb; \
-    else \
-        # Fall back to tar.gz binary installation
-        curl -fsSL "https://github.com/canyonroad/agentsh/releases/download/v${AGENTSH_VERSION}/agentsh_${AGENTSH_VERSION}_linux_${ARCH_NAME}.tar.gz" -o /tmp/agentsh.tar.gz; \
-        tar -xzf /tmp/agentsh.tar.gz -C /tmp; \
-        install -m 0755 /tmp/agentsh /usr/local/bin/agentsh; \
-        install -m 0755 /tmp/agentsh-shell-shim /usr/local/bin/agentsh-shell-shim 2>/dev/null || true; \
-        install -m 0755 /tmp/agentsh-unixwrap /usr/local/bin/agentsh-unixwrap 2>/dev/null || true; \
-        install -m 0755 /tmp/libenvshim.so /usr/local/lib/libenvshim.so 2>/dev/null || true; \
-        rm -rf /tmp/agentsh*; \
-    fi
+    curl -fsSL "https://github.com/canyonroad/agentsh/releases/download/v${AGENTSH_VERSION}/agentsh_v${AGENTSH_VERSION}_linux_${ARCH_NAME}_musl.tar.gz" -o /tmp/agentsh.tar.gz; \
+    tar -xzf /tmp/agentsh.tar.gz -C /tmp; \
+    install -m 0755 /tmp/agentsh /usr/local/bin/agentsh; \
+    install -m 0755 /tmp/agentsh-shell-shim /usr/local/bin/agentsh-shell-shim 2>/dev/null || true; \
+    install -m 0755 /tmp/agentsh-unixwrap /usr/local/bin/agentsh-unixwrap 2>/dev/null || true; \
+    # Install bash_startup.sh for BASH_ENV
+    mkdir -p /usr/lib/agentsh; \
+    install -m 0755 /tmp/packaging/bash_startup.sh /usr/lib/agentsh/bash_startup.sh 2>/dev/null || true; \
+    rm -rf /tmp/agentsh* /tmp/packaging
 
 # Verify agentsh installation
 RUN agentsh --version || echo "agentsh installation verification"

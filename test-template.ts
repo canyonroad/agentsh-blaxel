@@ -96,7 +96,7 @@ async function main() {
 
     // Test 3: Check agentsh server health
     console.log('=== Test 3: Check agentsh server ===')
-    const healthResult = await runCommand(sandboxUrl, token, 'curl -s http://127.0.0.1:19080/health')
+    const healthResult = await runCommand(sandboxUrl, token, 'curl -s http://127.0.0.1:18080/health')
     console.log(`Server health: ${healthResult.stdout.trim()}`)
     if (healthResult.stdout.trim() === 'ok') {
       console.log('✓ Server is healthy\n')

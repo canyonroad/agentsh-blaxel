@@ -83,6 +83,20 @@ bl deploy
 npx tsx test-template.ts
 ```
 
+### Alpine Variant
+
+An Alpine Linux variant is available for smaller image sizes:
+
+```bash
+# Deploy Alpine version
+bl deploy -f blaxel-alpine.toml
+
+# Run Alpine-specific tests
+npx tsx test-alpine.ts
+```
+
+The Alpine variant uses musl libc instead of glibc. Note that only amd64 architecture is supported for musl builds.
+
 Expected output:
 ```
 agentsh + Blaxel: Security Feature Tests
@@ -108,8 +122,10 @@ Success rate: 100.0%
 
 ```
 agentsh-blaxel/
-├── Dockerfile           # Container with agentsh + Blaxel sandbox-api
-├── blaxel.toml          # Blaxel sandbox configuration
+├── Dockerfile           # Container with agentsh + Blaxel (Debian/glibc)
+├── Dockerfile.alpine    # Alpine variant with musl libc
+├── blaxel.toml          # Blaxel sandbox configuration (Debian)
+├── blaxel-alpine.toml   # Blaxel sandbox configuration (Alpine)
 ├── entrypoint.sh        # Startup script
 ├── config.yaml          # agentsh server configuration
 │                        # - Network interception settings
@@ -121,7 +137,8 @@ agentsh-blaxel/
 │                        # - network_rules
 │                        # - command_rules
 │                        # - env_policy
-├── test-template.ts     # Security test suite
+├── test-template.ts     # Security test suite (Debian)
+├── test-alpine.ts       # Security test suite (Alpine)
 └── package.json         # Node.js dependencies
 ```
 

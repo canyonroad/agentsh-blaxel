@@ -1,13 +1,17 @@
-# Blaxel Sandbox Configuration for agentsh
+# Blaxel Sandbox Configuration for agentsh (Alpine)
 # This template creates a secure sandbox with agentsh runtime security
+# Uses Alpine Linux with musl libc for smaller image size
 
 type = "sandbox"
+name = "agentsh-blaxel-alpine"
 
 [runtime]
 # Use mk3 for ultra-fast cold starts
 generation = "mk3"
 # 4GB memory for comfortable operation
 memory = 4096
+# Use Alpine Dockerfile
+dockerfile = "Dockerfile.alpine"
 
 # agentsh server port
 [[runtime.ports]]
