@@ -1,0 +1,32 @@
+{
+  "name": "agentsh-blaxel",
+  "version": "1.0.0",
+  "description": "Demo: agentsh runtime security with Blaxel sandboxes",
+  "type": "module",
+  "scripts": {
+    "build": "docker build -t agentsh-blaxel .",
+    "demo:blocking": "npx tsx demo-blocking.ts",
+    "demo:network": "npx tsx demo-network.ts",
+    "demo:all": "npx tsx demo-blocking.ts && npx tsx demo-network.ts",
+    "deploy": "bl deploy"
+  },
+  "dependencies": {
+    "@blaxel/sdk": "^0.1.16",
+    "dotenv": "^16.3.0",
+    "yaml": "^2.8.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.0"
+  },
+  "keywords": [
+    "agentsh",
+    "blaxel",
+    "sandbox",
+    "ai-security",
+    "runtime-security"
+  ],
+  "author": "",
+  "license": "MIT"
+}

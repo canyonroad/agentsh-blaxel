@@ -1,0 +1,601 @@
+# Agent Sandbox Policy for agentsh on Blaxel
+# High-security sandbox for AI agents running untrusted code
+
+version: 1
+name: default
+description: |
+  Security policy for Blaxel sandbox with agentsh.
+  Default deny with explicit allowlist for safe operations.
+
+# =============================================================================
+# FILE OPERATION RULES
+# =============================================================================
+
+file_rules:
+  # Workspace - read/write allowed, deletes are soft (recoverable)
+  - name: allow-workspace-read
+    description: Allow reading files in workspace
+    paths:
+      - "/app"
+      - "/app/**"
+    operations:
+      - read
+      - open
+      - stat
+      - list
+      - readlink
+    decision: allow
+
+  - name: allow-workspace-write
+    description: Allow writing files in workspace
+    paths:
+      - "/app"
+      - "/app/**"
+    operations:
+      - write
+      - create
+      - mkdir
+      - chmod
+      - rename
+    decision: allow
+
+  - name: soft-delete-workspace
+    description: Soft-delete files in workspace (recoverable)
+    paths:
+      - "/app"
+      - "/app/**"
+    operations:
+      - delete
+      - rmdir
+    decision: soft_delete
+    message: "File quarantined (recoverable): {{.Path}}"
+
+  # Temp directories - full access
+  - name: allow-tmp
+    description: Full access to temp directories
+    paths:
+      - "/tmp/**"
+      - "/var/tmp/**"
+    operations:
+      - "*"
+    decision: allow
+
+  # Block dangerous binaries
+  - name: block-dangerous-binaries
+    description: Block execution of privilege escalation tools
+    paths:
+      - "/usr/bin/sudo"
+      - "/usr/bin/su"
+      - "/usr/bin/pkexec"
+      - "/usr/bin/doas"
+      - "/bin/su"
+      - "/usr/sbin/chroot"
+      - "/usr/bin/nsenter"
+      - "/usr/bin/unshare"
+    operations:
+      - "*"
+    decision: deny
+    message: "Access to privilege escalation tool blocked: {{.Path}}"
+
+  # System paths - read-only
+  - name: allow-system-read
+    description: Read access to system paths
+    paths:
+      - "/usr/**"
+      - "/lib/**"
+      - "/lib64/**"
+      - "/bin/**"
+      - "/sbin/**"
+    operations:
+      - read
+      - open
+      - stat
+      - list
+      - readlink
+    decision: allow
+
+  - name: allow-etc-minimal
+    description: Read minimal config files
+    paths:
+      - "/etc/hosts"
+      - "/etc/resolv.conf"
+      - "/etc/ssl/certs/**"
+      - "/etc/ca-certificates/**"
+      - "/etc/localtime"
+    operations:
+      - read
+      - stat
+    decision: allow
+
+  # Require approval for credential access
+  - name: approve-ssh-access
+    description: Require approval for SSH key access
+    paths:
+      - "/root/.ssh/**"
+    operations:
+      - "*"
+    decision: approve
+    message: "Agent wants to access SSH keys: {{.Path}}"
+    timeout: 5m
+
+  - name: approve-aws-credentials
+    description: Require approval for AWS credentials
+    paths:
+      - "/root/.aws/**"
+    operations:
+      - "*"
+    decision: approve
+    message: "Agent wants to access AWS credentials: {{.Path}}"
+    timeout: 5m
+
+  - name: approve-env-files
+    description: Require approval for .env files
+    paths:
+      - "**/.env"
+      - "**/.env.*"
+    operations:
+      - "*"
+    decision: approve
+    message: "Agent wants to access environment file: {{.Path}}"
+    timeout: 5m
+
+  # Package caches - read-only
+  - name: allow-cache-read
+    description: Read-only cache access
+    paths:
+      - "/root/.npm/**"
+      - "/root/.cache/**"
+      - "/root/.cargo/**"
+    operations:
+      - read
+      - open
+      - stat
+      - list
+    decision: allow
+
+  # Deny all other file operations
+  - name: default-deny-files
+    description: Deny all other file operations
+    paths:
+      - "**"
+    operations:
+      - "*"
+    decision: deny
+
+# =============================================================================
+# NETWORK OPERATION RULES
+# =============================================================================
+
+network_rules:
+  # Allow localhost
+  - name: allow-localhost
+    description: Allow localhost connections
+    cidrs:
+      - "127.0.0.1/32"
+      - "::1/128"
+    decision: allow
+
+  # Package registries
+  - name: allow-npm
+    description: npm registry
+    domains:
+      - "registry.npmjs.org"
+    ports: [443]
+    decision: allow
+
+  - name: allow-pypi
+    description: PyPI
+    domains:
+      - "pypi.org"
+      - "files.pythonhosted.org"
+    ports: [443]
+    decision: allow
+
+  - name: allow-cargo
+    description: Cargo registry
+    domains:
+      - "crates.io"
+      - "static.crates.io"
+    ports: [443]
+    decision: allow
+
+  - name: allow-go-proxy
+    description: Go module proxy
+    domains:
+      - "proxy.golang.org"
+      - "sum.golang.org"
+    ports: [443]
+    decision: allow
+
+  - name: allow-github
+    description: GitHub access
+    domains:
+      - "github.com"
+      - "api.github.com"
+      - "raw.githubusercontent.com"
+    ports: [443]
+    decision: allow
+
+  # Block private/internal networks
+  - name: block-private-networks
+    description: Block internal/private networks
+    cidrs:
+      - "10.0.0.0/8"
+      - "172.16.0.0/12"
+      - "192.168.0.0/16"
+      - "169.254.0.0/16"
+    decision: deny
+
+  - name: block-metadata-services
+    description: Block cloud metadata services
+    cidrs:
+      - "169.254.169.254/32"
+      - "100.100.100.200/32"
+    decision: deny
+
+  # Default deny for all other destinations
+  - name: default-deny-network
+    description: Deny all other network connections
+    domains:
+      - "*"
+    decision: deny
+    message: "Network access blocked - not in allowlist: {{.RemoteAddr}}"
+
+# =============================================================================
+# COMMAND RULES
+# =============================================================================
+
+command_rules:
+  # Allow curl/wget
+  - name: allow-network-tools
+    description: Allow curl/wget (network rules enforce domain policy)
+    commands:
+      - curl
+      - wget
+    decision: allow
+
+  # Allow safe commands
+  - name: allow-safe-commands
+    description: Standard safe commands
+    commands:
+      - bash
+      - sh
+      - /bin/bash
+      - /bin/sh
+      - ls
+      - cat
+      - head
+      - tail
+      - grep
+      - find
+      - wc
+      - sort
+      - uniq
+      - diff
+      - pwd
+      - echo
+      - date
+      - which
+      - whoami
+      - id
+      - env
+      - printenv
+    decision: allow
+
+  - name: allow-dev-tools
+    description: Development tools
+    commands:
+      - git
+      - node
+      - npm
+      - npx
+      - python
+      - python3
+      - pip
+      - pip3
+      - cargo
+      - go
+      - make
+    decision: allow
+
+  # Per-command environment overrides for package managers
+  - name: npm-with-env
+    description: npm with registry token access
+    commands:
+      - npm
+      - npx
+      - yarn
+      - pnpm
+    decision: allow
+    env_allow:
+      - "NPM_TOKEN"
+      - "NODE_AUTH_TOKEN"
+      - "NPM_CONFIG_*"
+      - "NODE_ENV"
+      - "NODE_OPTIONS"
+    env_deny: []  # Override global deny for these specific vars
+    env_max_bytes: 32768
+    env_max_keys: 50
+    env_block_iteration: false
+
+  - name: pip-with-env
+    description: pip with index URL access
+    commands:
+      - pip
+      - pip3
+      - poetry
+      - pipenv
+    decision: allow
+    env_allow:
+      - "PIP_INDEX_URL"
+      - "PIP_EXTRA_INDEX_URL"
+      - "PYTHONPATH"
+      - "VIRTUAL_ENV"
+    env_deny: []
+    env_block_iteration: false
+
+  - name: git-with-env
+    description: git with author info
+    commands:
+      - git
+    decision: allow
+    env_allow:
+      - "GIT_AUTHOR_NAME"
+      - "GIT_AUTHOR_EMAIL"
+      - "GIT_COMMITTER_NAME"
+      - "GIT_COMMITTER_EMAIL"
+      - "GIT_DIR"
+      - "GIT_WORK_TREE"
+    env_deny:
+      - "GIT_ASKPASS"
+      - "SSH_ASKPASS"
+      - "GIT_SSH_COMMAND"
+
+  # Approve package installation
+  - name: approve-package-install
+    description: Require approval for package installation
+    commands:
+      - npm
+      - pip
+      - pip3
+      - cargo
+    args_patterns:
+      - "^install.*"
+      - "^add.*"
+    decision: approve
+    message: "Agent wants to install packages: {{.Args}}"
+
+  # Block dangerous commands
+  - name: block-rm-recursive
+    description: Block recursive delete
+    commands:
+      - rm
+    args_patterns:
+      - ".*-r.*"
+      - ".*--recursive.*"
+    decision: deny
+    message: "Recursive delete blocked. Files can be removed individually."
+
+  - name: block-network-tools
+    description: Block raw network tools
+    commands:
+      - nc
+      - netcat
+      - ncat
+      - socat
+      - telnet
+      - ssh
+      - scp
+      - rsync
+    decision: deny
+
+  - name: block-system-commands
+    description: Block system administration commands
+    commands:
+      - shutdown
+      - reboot
+      - systemctl
+      - service
+      - mount
+      - umount
+      - dd
+      - fdisk
+      - mkfs
+      - kill
+      - killall
+      - pkill
+    decision: deny
+
+  - name: block-shell-escape
+    description: Block potential shell escapes
+    commands:
+      - sudo
+      - su
+      - chroot
+      - nsenter
+      - unshare
+    decision: deny
+
+  # -------------------------------------------------------------------------
+  # REDIRECT RULES - Steer dangerous commands to safe alternatives
+  # -------------------------------------------------------------------------
+
+  # Redirect curl/wget to audited fetch wrapper
+  - name: redirect-downloads
+    description: Route downloads through audited proxy
+    commands:
+      - curl
+      - wget
+    args_patterns:
+      - ".*http.*"  # Any URL argument
+    decision: redirect
+    redirect_to:
+      command: agentsh-fetch
+      args: ["--audit", "--log", "/var/log/agentsh/downloads.log"]
+    message: "Download redirected through audited proxy"
+
+  # Redirect rm to safe-rm wrapper (moves to quarantine instead of delete)
+  - name: redirect-rm-to-safe
+    description: Redirect rm to quarantine instead of permanent delete
+    commands:
+      - rm
+    args_patterns:
+      - "^[^-].*"  # Files without flags (single file delete)
+    decision: redirect
+    redirect_to:
+      command: agentsh-quarantine
+      args: ["--reason", "rm-redirect"]
+    message: "File moved to quarantine instead of deleted"
+
+  # Redirect cat on sensitive files to redacted output
+  - name: redirect-cat-secrets
+    description: Redirect reading of secret files to redacted version
+    commands:
+      - cat
+      - head
+      - tail
+      - less
+      - more
+    args_patterns:
+      - ".*\\.env.*"
+      - ".*secret.*"
+      - ".*credential.*"
+      - ".*\\.pem$"
+      - ".*\\.key$"
+    decision: redirect
+    redirect_to:
+      command: agentsh-redact
+      args: ["--pattern", "secrets"]
+    message: "Sensitive file content redacted"
+
+  # Allow other commands (security enforced via file_rules and network_rules)
+  - name: allow-other-commands
+    description: Allow remaining commands
+    commands:
+      - "*"
+    decision: allow
+
+# =============================================================================
+# ENVIRONMENT VARIABLE POLICY
+# =============================================================================
+# Control which environment variables are passed to commands
+# Default: blocks known dangerous vars, allows safe system vars
+
+env_policy:
+  # Allowlist mode - only these variables pass through (glob patterns supported)
+  allow:
+    - "HOME"
+    - "PATH"
+    - "LANG"
+    - "TERM"
+    - "USER"
+    - "SHELL"
+    - "PWD"
+    - "TMPDIR"
+    - "TZ"
+    - "HOSTNAME"
+    - "AGENTSH_*"      # Internal agentsh vars always allowed
+    - "CI"             # CI environment flag
+    - "CI_*"           # CI-related vars
+    - "BASH_ENV"       # Required to disable bash built-ins
+
+  # Denylist - these are ALWAYS blocked (overrides allow)
+  deny:
+    # Cloud credentials
+    - "AWS_*"
+    - "AZURE_*"
+    - "GOOGLE_*"
+    - "KUBECONFIG"
+
+    # API keys and tokens
+    - "*_SECRET*"
+    - "*_TOKEN"
+    - "*_KEY"
+    - "*_API_KEY"
+    - "*_APIKEY"
+    - "OPENAI_*"
+    - "ANTHROPIC_*"
+    - "GITHUB_TOKEN"
+    - "GH_TOKEN"
+    - "NPM_TOKEN"
+    - "DATABASE_URL"
+    - "DB_PASSWORD"
+
+    # Dynamic linker injection (security critical)
+    - "LD_PRELOAD"
+    - "LD_LIBRARY_PATH"
+    - "LD_AUDIT"
+    - "DYLD_*"
+
+    # Shell injection vectors
+    - "BASH_ENV"
+    - "ENV"
+    - "PROMPT_COMMAND"
+    - "SHELLOPTS"
+
+    # Git credential helpers
+    - "GIT_ASKPASS"
+    - "SSH_ASKPASS"
+    - "GIT_SSH_COMMAND"
+
+  # Resource limits
+  max_bytes: 65536    # Total env size limit (64KB)
+  max_keys: 100       # Max number of env vars
+
+  # Block env enumeration commands (env, printenv, export)
+  block_iteration: false
+
+# =============================================================================
+# SIGNAL RULES (COMMENTED - requires specific agentsh version)
+# =============================================================================
+# Control which signals processes can send to other processes
+# Uncomment when using agentsh with signal_rules support
+#
+# signal_rules:
+#   - name: allow-job-control
+#     description: Allow standard job control signals
+#     signals: [SIGCONT, SIGSTOP, SIGTSTP, SIGTTIN, SIGTTOU]
+#     decision: allow
+#
+#   - name: allow-sigterm
+#     description: Allow SIGTERM for graceful shutdown
+#     signals: [SIGTERM, SIGINT, SIGHUP]
+#     decision: allow
+#
+#   - name: block-sigkill
+#     description: Require approval for SIGKILL
+#     signals: [SIGKILL]
+#     decision: approve
+#     message: "Agent wants to force-kill a process (SIGKILL)"
+#
+#   - name: block-debug-signals
+#     description: Block debugging/tracing signals
+#     signals: [SIGTRAP, SIGBUS]
+#     decision: deny
+#     message: "Debug signals are blocked"
+
+# =============================================================================
+# RESOURCE LIMITS
+# =============================================================================
+
+resource_limits:
+  max_memory_mb: 2048
+  memory_swap_max_mb: 0
+  cpu_quota_percent: 50
+  pids_max: 100
+  command_timeout: 5m
+  session_timeout: 1h
+  idle_timeout: 15m
+
+# =============================================================================
+# AUDIT SETTINGS
+# =============================================================================
+
+audit:
+  log_allowed: true
+  log_denied: true
+  log_approved: true
+  include_stdout: true
+  include_stderr: true
+  include_file_content: false
+  retention_days: 90

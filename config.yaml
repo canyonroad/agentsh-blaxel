@@ -1,0 +1,242 @@
+# agentsh Server Configuration for Blaxel Sandbox
+# Optimized for containerized AI agent environments
+
+# Security settings from agentsh detect
+security:
+  mode: "full"      # Uses seccomp + eBPF + FUSE
+  strict: true      # Enforce all security features
+
+server:
+  http:
+    addr: "127.0.0.1:18080"
+    read_timeout: "30s"
+    write_timeout: "60s"
+  grpc:
+    enabled: false
+
+auth:
+  type: "none"
+
+logging:
+  level: "info"
+  format: "text"
+  output: "stderr"
+
+sessions:
+  base_dir: "/var/lib/agentsh/sessions"
+  max_sessions: 100
+  default_timeout: "1h"
+  default_idle_timeout: "15m"
+  cleanup_interval: "5m"
+
+audit:
+  enabled: true
+  storage:
+    sqlite_path: "/var/lib/agentsh/events.db"
+
+sandbox:
+  enabled: true
+  allow_degraded: false  # Require enforcement features to be available
+
+  # env_inject: Environment variables injected into all commands
+  # These bypass env policy filtering (operator-trusted)
+  # Primary use: BASH_ENV to disable bash builtins that bypass seccomp
+  env_inject:
+    BASH_ENV: "/usr/lib/agentsh/bash_startup.sh"
+
+  # Resource limits enforced at sandbox level
+  limits:
+    max_memory_mb: 2048
+    max_cpu_percent: 50
+    max_processes: 100
+
+  # FUSE filesystem interception (requires FUSE support)
+  # Enables file_rules enforcement for file operations
+  fuse:
+    enabled: true
+    audit:
+      enabled: true
+      mode: "monitor"  # Valid modes: monitor
+
+  # Network interception
+  network:
+    enabled: true
+    intercept_mode: "all"  # Options: all, dns, connect
+    proxy_listen_addr: "127.0.0.1:0"
+
+  # cgroups resource enforcement
+  # Note: Requires cgroup v2 and write access to cgroup filesystem
+  cgroups:
+    enabled: false  # Keep disabled - read-only cgroup fs in containers
+
+  # Unix sockets wrapper settings (seccomp enforcement)
+  # REQUIRED for command blocking to work - wraps commands with agentsh-unixwrap
+  unix_sockets:
+    enabled: true
+    # wrapper_bin: "agentsh-unixwrap"  # Optional: defaults to agentsh-unixwrap in PATH
+
+  # Seccomp syscall filtering
+  # Enables command_rules enforcement at syscall level
+  seccomp:
+    enabled: true
+    mode: "enforce"  # Options: enforce, audit
+    syscalls:
+      default_action: "allow"
+      on_block: "errno"  # Return error instead of killing process
+    # Enable execve interception for command blocking
+    execve:
+      enabled: true
+
+policies:
+  dir: "/etc/agentsh/policies"
+  default_policy: "default"
+
+approvals:
+  enabled: false  # Disable approvals for sandbox (no TTY available)
+  mode: "async"
+  timeout: "1s"  # Fast timeout if re-enabled
+  # webhook:
+  #   url: "https://your-approval-endpoint.com/approve"
+  #   headers:
+  #     Authorization: "Bearer ${APPROVAL_TOKEN}"
+
+health:
+  path: "/health"
+  readiness_path: "/ready"
+
+# =============================================================================
+# LLM PROXY - Intercept LLM API requests for auditing and DLP
+# =============================================================================
+
+proxy:
+  mode: "embedded"  # Options: embedded, external, disabled
+  port: 0  # Dynamic port assignment (0 = auto)
+
+  # Supported LLM providers
+  providers:
+    anthropic: "https://api.anthropic.com"
+    openai: "https://api.openai.com"
+    azure_openai: "https://*.openai.azure.com"
+    google: "https://generativelanguage.googleapis.com"
+    cohere: "https://api.cohere.ai"
+    huggingface: "https://api-inference.huggingface.co"
+
+  # Audit all LLM requests
+  audit:
+    enabled: true
+    log_prompts: true
+    log_responses: true
+    log_tokens: true
+
+# =============================================================================
+# DLP (Data Loss Prevention) - Redact sensitive data from outputs
+# =============================================================================
+
+dlp:
+  enabled: true
+  mode: "redact"  # Options: redact, warn, block
+
+  # Built-in pattern detection
+  patterns:
+    email: true
+    phone: true
+    credit_card: true
+    ssn: true
+    api_keys: true
+    ip_addresses: false  # Often needed in logs
+    urls: false  # Often legitimate
+
+  # Custom patterns for secret detection
+  custom_patterns:
+    # OpenAI API keys
+    - name: openai_key
+      display: "[OPENAI_KEY]"
+      regex: "sk-[a-zA-Z0-9]{48,}"
+      action: redact
+
+    # Anthropic API keys
+    - name: anthropic_key
+      display: "[ANTHROPIC_KEY]"
+      regex: "sk-ant-[a-zA-Z0-9-]{95,}"
+      action: redact
+
+    # AWS Access Keys
+    - name: aws_access_key
+      display: "[AWS_KEY]"
+      regex: "AKIA[0-9A-Z]{16}"
+      action: redact
+
+    # AWS Secret Keys (40 char base64)
+    - name: aws_secret_key
+      display: "[AWS_SECRET]"
+      regex: "[A-Za-z0-9/+=]{40}"
+      action: warn  # Too many false positives for auto-redact
+
+    # GitHub Personal Access Tokens
+    - name: github_pat
+      display: "[GITHUB_TOKEN]"
+      regex: "ghp_[a-zA-Z0-9]{36}"
+      action: redact
+
+    # GitHub OAuth tokens
+    - name: github_oauth
+      display: "[GITHUB_OAUTH]"
+      regex: "gho_[a-zA-Z0-9]{36}"
+      action: redact
+
+    # Generic API keys (key=value format)
+    - name: generic_api_key
+      display: "[API_KEY]"
+      regex: "(api[_-]?key|apikey|api[_-]?secret)['\"]?\\s*[:=]\\s*['\"]?[a-zA-Z0-9_-]{20,}"
+      action: redact
+
+    # JWT tokens
+    - name: jwt_token
+      display: "[JWT]"
+      regex: "eyJ[a-zA-Z0-9_-]*\\.eyJ[a-zA-Z0-9_-]*\\.[a-zA-Z0-9_-]*"
+      action: redact
+
+    # Private keys (PEM format)
+    - name: private_key
+      display: "[PRIVATE_KEY]"
+      regex: "-----BEGIN [A-Z]+ PRIVATE KEY-----"
+      action: block  # Never allow private keys through
+
+    # Slack tokens
+    - name: slack_token
+      display: "[SLACK_TOKEN]"
+      regex: "xox[baprs]-[0-9]{10,13}-[0-9]{10,13}-[a-zA-Z0-9]{24}"
+      action: redact
+
+    # Database connection strings
+    - name: database_url
+      display: "[DATABASE_URL]"
+      regex: "(postgres|mysql|mongodb|redis)://[^\\s]+"
+      action: redact
+
+    # Bearer tokens
+    - name: bearer_token
+      display: "[BEARER_TOKEN]"
+      regex: "Bearer\\s+[a-zA-Z0-9_-]{20,}"
+      action: redact
+
+  # Files to always redact when reading
+  redact_files:
+    - "**/.env"
+    - "**/.env.*"
+    - "**/credentials*"
+    - "**/*secret*"
+    - "**/*.pem"
+    - "**/*.key"
+
+# =============================================================================
+# METRICS & MONITORING
+# =============================================================================
+
+metrics:
+  enabled: true
+  path: "/metrics"
+
+development:
+  disable_auth: true
+  verbose_errors: false

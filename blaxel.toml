@@ -1,0 +1,22 @@
+# Blaxel Sandbox Configuration for agentsh
+# This template creates a secure sandbox with agentsh runtime security
+
+type = "sandbox"
+
+[runtime]
+# Use mk3 for ultra-fast cold starts
+generation = "mk3"
+# 4GB memory for comfortable operation
+memory = 4096
+
+# agentsh server port
+[[runtime.ports]]
+name = "agentsh"
+target = 19080
+protocol = "tcp"
+
+# Optional: sandbox API port (if needed)
+[[runtime.ports]]
+name = "sandbox-api"
+target = 8080
+protocol = "tcp"
