@@ -203,6 +203,35 @@ Automatically detects and redacts:
 - Database URLs
 - Bearer tokens
 
+See the [agentsh DLP documentation](https://www.agentsh.org/docs/#llm-proxy) for more details on Data Loss Prevention and LLM request auditing.
+
+## Blaxel-Specific Protections
+
+agentsh provides additional security for Blaxel sandboxes beyond standard isolation:
+
+| Threat | Without agentsh | With agentsh |
+|--------|-----------------|--------------|
+| **Process history disclosure** | Agents can list all processes via `localhost:8080/process` | Network policy blocks internal API access |
+| **Internal DNS probing** | Agents could enumerate Blaxel's internal DNS (172.16.x.x) | Private network ranges blocked |
+| **Sandbox-api manipulation** | Direct API calls could bypass intended workflows | All commands routed through agentsh policy |
+| **Signal attacks** | Bash `kill` builtin could signal sandbox-api/agentsh | Builtins disabled via BASH_ENV |
+| **Cloud credential theft** | Agents could access 169.254.169.254 metadata | Metadata endpoint blocked |
+
+### Blocking Internal API Access
+
+To prevent agents from directly accessing Blaxel's sandbox-api (which could leak process history), add to `default.yaml`:
+
+```yaml
+network_rules:
+  # Block direct access to sandbox-api
+  - name: block-sandbox-api
+    destinations:
+      - "127.0.0.1:8080"
+      - "localhost:8080"
+    decision: deny
+    message: "Direct sandbox-api access not permitted"
+```
+
 ## Architecture
 
 ```
