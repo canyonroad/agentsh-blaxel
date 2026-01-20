@@ -1,10 +1,38 @@
 # agentsh + Blaxel
 
-Runtime security governance for AI agents using [agentsh](https://www.agentsh.org) with [Blaxel](https://blaxel.ai) sandboxes.
+Runtime security governance for AI agents using [agentsh](https://github.com/canyonroad/agentsh) with [Blaxel](https://blaxel.ai) sandboxes.
+
+## Why agentsh + Blaxel?
+
+**Blaxel provides isolation. agentsh provides governance.**
+
+Blaxel sandboxes give AI agents a secure, isolated compute environment. But isolation alone doesn't prevent an agent from:
+
+- **Exfiltrating data** to unauthorized endpoints
+- **Accessing cloud metadata** (AWS/GCP/Azure credentials at 169.254.169.254)
+- **Leaking secrets** in outputs (API keys, tokens, PII)
+- **Running dangerous commands** (sudo, ssh, kill, nc)
+- **Reaching internal networks** (10.x, 172.16.x, 192.168.x)
+
+**agentsh adds the security governance layer** that controls what agents can do inside the sandbox, providing defense-in-depth:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Blaxel Sandbox (Isolation)                             │
+│  ┌───────────────────────────────────────────────────┐  │
+│  │  agentsh (Governance)                             │  │
+│  │  ┌─────────────────────────────────────────────┐  │  │
+│  │  │  AI Agent                                   │  │  │
+│  │  │  - Commands are policy-checked              │  │  │
+│  │  │  - Network requests are filtered            │  │  │
+│  │  │  - Secrets are redacted from output         │  │  │
+│  │  │  - All actions are audited                  │  │  │
+│  │  └─────────────────────────────────────────────┘  │  │
+│  └───────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────┘
+```
 
 ## What agentsh Adds to Blaxel
-
-Blaxel provides excellent compute isolation for AI agents - a perpetual sandbox environment with process isolation and API access. **agentsh adds the security governance layer** that controls what agents can do inside that sandbox:
 
 | Blaxel Provides | agentsh Adds |
 |-----------------|--------------|
@@ -12,11 +40,11 @@ Blaxel provides excellent compute isolation for AI agents - a perpetual sandbox 
 | Process sandboxing | Domain allowlist/blocklist |
 | API access to sandbox | Cloud metadata blocking |
 | Persistent environment | Environment variable filtering |
-| | Secret detection and filtering |
-| | DLP (Data Loss Prevention) |
+| | Secret detection and redaction (DLP) |
+| | Dangerous command blocking |
+| | Bash builtin interception |
 | | LLM request auditing |
 | | Complete audit logging |
-| | Policy-based access control |
 
 ### Key Security Features
 
@@ -52,7 +80,7 @@ bl deploy
 
 ```bash
 # Run the security test suite
-npx tsx test-blaxel.ts
+npx tsx test-template.ts
 ```
 
 Expected output:
@@ -258,7 +286,7 @@ resource_limits:
 Run the full test suite:
 
 ```bash
-npx tsx test-blaxel.ts
+npx tsx test-template.ts
 ```
 
 Test individual features:
