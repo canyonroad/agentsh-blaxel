@@ -59,6 +59,36 @@ Blaxel sandboxes give AI agents a secure, isolated compute environment. But isol
 | **Audit Logging** | Complete visibility into agent operations | Working |
 | **Command Rules** | Policy correctly identifies blocked commands | Working |
 
+### Security Capabilities in Blaxel
+
+Running `agentsh detect` inside a Blaxel sandbox shows full security mode with 100% protection score:
+
+```
+$ agentsh detect
+Platform: linux
+Security Mode: full
+Protection Score: 100%
+
+CAPABILITIES
+----------------------------------------
+  capabilities_drop        ✓
+  cgroups_v2               ✓
+  ebpf                     ✓
+  fuse                     ✓
+  landlock                 -
+  landlock_abi             ✓ (v0)
+  landlock_network         -
+  pid_namespace            -
+  seccomp                  ✓
+  seccomp_basic            ✓
+  seccomp_user_notify      ✓
+
+TIPS
+----------------------------------------
+  landlock_network: Kernel-level network restrictions disabled
+    -> Requires kernel 6.7+ (Landlock ABI v4). Upgrade kernel or use proxy-based network control.
+```
+
 ## Quick Start
 
 ### Prerequisites
