@@ -1,6 +1,6 @@
 #!/bin/bash.real
-# Entrypoint script for Blaxel Sandbox with agentsh
-# Starts the agentsh server and installs the shell shim
+# Entrypoint script for Blaxel Sandbox with agentsh (Debian)
+# Starts the agentsh server and sandbox-api
 #
 # NOTE: Uses /bin/bash.real (original bash) because /bin/bash is now the
 # agentsh shell shim. The shim requires the server to be running, which
@@ -11,7 +11,6 @@ set -e
 # Configuration
 AGENTSH_SERVER_PORT=${AGENTSH_SERVER_PORT:-18080}
 AGENTSH_CONFIG=${AGENTSH_CONFIG:-/etc/agentsh/config.yaml}
-REAL_BASH="/bin/bash.real"
 
 # Colors for output
 RED='\033[0;31m'
@@ -84,10 +83,9 @@ start_agentsh_server() {
     fi
 }
 
-# Install shell shim (DISABLED - causes all sandbox-api commands to hang)
-install_shell_shim() {
-    log_info "Shell shim installation disabled for sandbox compatibility"
-    log_info "Use 'agentsh exec -- <command>' for policy enforcement"
+# Configure environment
+configure_environment() {
+    log_info "Configuring environment..."
 
     # Ensure AGENTSH_SERVER is set in /etc/environment for all processes
     echo "AGENTSH_SERVER=http://127.0.0.1:18080" >> /etc/environment
@@ -96,14 +94,12 @@ install_shell_shim() {
 
 # Main entry point
 main() {
-    log_info "Initializing Blaxel Sandbox with agentsh..."
+    log_info "Initializing Blaxel Sandbox with agentsh (Debian)..."
 
     # Create required directories if they don't exist
     mkdir -p /var/lib/agentsh/sessions /var/lib/agentsh/quarantine /var/log/agentsh
 
     # IMPORTANT: Start Blaxel sandbox-api FIRST (required for sandbox functionality)
-    # Note: In Blaxel, the sandbox-api port 8080 is exposed externally but may not be
-    # on localhost:8080 internally, so we don't wait for the port
     if command -v sandbox-api &> /dev/null; then
         log_info "Starting Blaxel sandbox API..."
         sandbox-api &
@@ -122,8 +118,8 @@ main() {
     # Start the agentsh server
     start_agentsh_server
 
-    # Install the shell shim
-    install_shell_shim
+    # Configure environment
+    configure_environment
 
     log_info "agentsh initialization complete"
     log_info "Server running at http://localhost:$AGENTSH_SERVER_PORT"

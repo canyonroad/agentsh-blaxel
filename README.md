@@ -85,17 +85,29 @@ npx tsx test-template.ts
 
 ### Alpine Variant
 
-An Alpine Linux variant is available for smaller image sizes:
+An Alpine Linux variant is available for smaller image sizes. However, it has **reduced security** due to BusyBox incompatibility with the shell shim:
+
+| Feature | Debian | Alpine |
+|---------|--------|--------|
+| Shell shim interception | Yes | No |
+| Network policy | Yes | Yes |
+| DLP/secret redaction | Yes | Yes |
+| Audit logging | Yes | Yes |
+| BASH_ENV builtin blocking | Yes | Yes (bash only) |
+| Image size | ~450MB | ~200MB |
+| Architecture support | amd64, arm64 | amd64 only |
+
+**Why no shell shim on Alpine?** Alpine uses BusyBox, which determines which applet to run based on the binary name (argv[0]). Renaming `/bin/sh` to `/bin/sh.real` breaks this mechanism entirely. Commands run through the sandbox-api will bypass agentsh policy on Alpine.
 
 ```bash
-# Deploy Alpine version
+# Deploy Alpine version (for testing/development only)
 bl deploy -f blaxel-alpine.toml
 
 # Run Alpine-specific tests
 npx tsx test-alpine.ts
 ```
 
-The Alpine variant uses musl libc instead of glibc. Note that only amd64 architecture is supported for musl builds.
+**Recommendation:** Use the Debian variant for production workloads requiring full security.
 
 Expected output:
 ```
@@ -122,17 +134,20 @@ Success rate: 100.0%
 
 ```
 agentsh-blaxel/
-├── Dockerfile           # Container with agentsh + Blaxel (Debian/glibc)
-├── Dockerfile.alpine    # Alpine variant with musl libc
-├── blaxel.toml          # Blaxel sandbox configuration (Debian)
-├── blaxel-alpine.toml   # Blaxel sandbox configuration (Alpine)
-├── entrypoint.sh        # Startup script
-├── config.yaml          # agentsh server configuration
+├── blaxel.toml          # Blaxel configuration (default: Debian)
+├── blaxel-alpine.toml   # Blaxel configuration (Alpine)
+├── Dockerfile           # Debian container with agentsh + shell shim
+├── Dockerfile.alpine    # Alpine container (no shell shim)
+├── debian/              # Debian-specific files
+│   └── entrypoint.sh    # Startup script for Debian
+├── alpine/              # Alpine-specific files
+│   └── entrypoint.sh    # Startup script for Alpine
+├── config.yaml          # agentsh server configuration (shared)
 │                        # - Network interception settings
 │                        # - DLP patterns
 │                        # - LLM proxy settings
 │                        # - env_inject (BASH_ENV for builtin blocking)
-├── default.yaml         # Security policy rules
+├── default.yaml         # Security policy rules (shared)
 │                        # - file_rules
 │                        # - network_rules
 │                        # - command_rules

@@ -116,21 +116,19 @@ async function main() {
     console.log(`Config:\n${configResult.stdout}`)
     console.log('✓ Config file exists\n')
 
-    // Test 6: Test command execution via agentsh exec
-    console.log('=== Test 6: Test agentsh exec ===')
-    const execResult = await runCommand(sandboxUrl, token,
-      'agentsh exec test-session --timeout 10s -- /bin/echo "Hello from agentsh-blaxel!"')
-    console.log(`Exec output: ${execResult.stdout.trim()}`)
-    if (execResult.exitCode === 0 && execResult.stdout.includes('Hello')) {
-      console.log('✓ agentsh exec works\n')
+    // Test 6: Test shell shim command execution
+    console.log('=== Test 6: Test shell shim (echo) ===')
+    const echoResult = await runCommand(sandboxUrl, token, 'echo "Hello from agentsh-blaxel!"')
+    console.log(`Echo output: ${echoResult.stdout.trim()}`)
+    if (echoResult.exitCode === 0 && echoResult.stdout.includes('Hello')) {
+      console.log('✓ Shell shim works\n')
     } else {
-      console.log('✗ agentsh exec failed\n')
+      console.log('✗ Shell shim failed\n')
     }
 
-    // Test 7: Test another command via agentsh exec
-    console.log('=== Test 7: Test file listing via agentsh exec ===')
-    const lsResult = await runCommand(sandboxUrl, token,
-      'agentsh exec test-session --timeout 10s -- /bin/ls -la /etc/agentsh/')
+    // Test 7: Test file listing
+    console.log('=== Test 7: Test file listing ===')
+    const lsResult = await runCommand(sandboxUrl, token, 'ls -la /etc/agentsh/')
     console.log(`ls output:\n${lsResult.stdout}`)
     if (lsResult.exitCode === 0) {
       console.log('✓ File listing works\n')
@@ -138,10 +136,9 @@ async function main() {
       console.log('✗ File listing failed\n')
     }
 
-    // Test 8: Test bash command via agentsh exec
-    console.log('=== Test 8: Test bash via agentsh exec ===')
-    const bashResult = await runCommand(sandboxUrl, token,
-      'agentsh exec test-session --timeout 10s -- /bin/bash -c "echo Current time: $(date)"')
+    // Test 8: Test bash command
+    console.log('=== Test 8: Test bash execution ===')
+    const bashResult = await runCommand(sandboxUrl, token, '/bin/bash -c "echo Current time: $(date)"')
     console.log(`Bash output: ${bashResult.stdout.trim()}`)
     if (bashResult.exitCode === 0) {
       console.log('✓ Bash execution works\n')

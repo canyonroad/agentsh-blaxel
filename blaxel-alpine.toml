@@ -1,6 +1,8 @@
 # Blaxel Sandbox Configuration for agentsh (Alpine)
-# This template creates a secure sandbox with agentsh runtime security
-# Uses Alpine Linux with musl libc for smaller image size
+# Smaller image but limited security (no shell shim)
+#
+# NOTE: Alpine variant does NOT intercept shell commands due to BusyBox
+# incompatibility. Use Debian variant for full security.
 
 type = "sandbox"
 name = "agentsh-blaxel-alpine"

@@ -1,4 +1,4 @@
-# Blaxel Sandbox with agentsh Runtime Security
+# Blaxel Sandbox with agentsh Runtime Security (Debian)
 # Based on the agentsh-e2b template adapted for Blaxel's sandbox platform
 
 # Use glibc-based image (agentsh-unixwrap requires glibc)
@@ -57,6 +57,7 @@ RUN mkdir -p /etc/agentsh/policies \
              /var/log/agentsh
 
 # Copy agentsh configuration files (BEFORE shim installation)
+# Paths relative to build context (project root)
 COPY config.yaml /etc/agentsh/config.yaml
 COPY default.yaml /etc/agentsh/policies/default.yaml
 
@@ -69,8 +70,8 @@ RUN chmod 755 /etc/agentsh /etc/agentsh/policies \
 # Set up working directory
 WORKDIR /app
 
-# Copy entrypoint script
-COPY entrypoint.sh /entrypoint.sh
+# Copy entrypoint script (from debian subdirectory)
+COPY debian/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # Expose ports

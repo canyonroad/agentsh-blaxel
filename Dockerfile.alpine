@@ -1,5 +1,17 @@
 # Blaxel Sandbox with agentsh Runtime Security (Alpine/musl)
 # Alpine-based variant using musl libc
+#
+# NOTE: This variant does NOT install the shell shim because BusyBox's
+# symlink-based applet detection is incompatible with the shim approach.
+# Security features available:
+#   - Network policy enforcement (via agentsh server)
+#   - DLP/secret redaction
+#   - Audit logging
+#   - BASH_ENV builtin blocking (when bash is explicitly used)
+# NOT available:
+#   - Automatic shell interception (commands via sandbox-api bypass policy)
+#
+# For full security, use the Debian variant.
 
 FROM node:22-alpine
 
@@ -48,7 +60,8 @@ RUN mkdir -p /etc/agentsh/policies \
              /var/lib/agentsh/sessions \
              /var/log/agentsh
 
-# Copy agentsh configuration files (BEFORE shim installation)
+# Copy agentsh configuration files
+# Paths relative to build context (project root)
 COPY config.yaml /etc/agentsh/config.yaml
 COPY default.yaml /etc/agentsh/policies/default.yaml
 
@@ -61,8 +74,8 @@ RUN chmod 755 /etc/agentsh /etc/agentsh/policies \
 # Set up working directory
 WORKDIR /app
 
-# Copy entrypoint script
-COPY entrypoint.sh /entrypoint.sh
+# Copy entrypoint script (from alpine subdirectory)
+COPY alpine/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # Expose ports
@@ -73,14 +86,11 @@ EXPOSE 8080 18080
 # Set environment variables
 ENV AGENTSH_SERVER=http://127.0.0.1:18080
 ENV PATH="/usr/local/bin:$PATH"
+# Set BASH_ENV for bash builtin blocking
+ENV BASH_ENV=/usr/lib/agentsh/bash_startup.sh
 
-# Install shell shim LAST - this replaces /bin/sh and /bin/bash
-# After this point, all shell commands go through the shim
-# NOTE: This must be the final RUN command!
-RUN agentsh shim install-shell \
-    --root / \
-    --shim /usr/bin/agentsh-shell-shim \
-    --bash \
-    --i-understand-this-modifies-the-host
+# NOTE: Shell shim NOT installed on Alpine due to BusyBox incompatibility
+# Commands run through sandbox-api will bypass agentsh policy
+# Use 'agentsh exec -- <command>' for explicit policy enforcement
 
 ENTRYPOINT ["/entrypoint.sh"]

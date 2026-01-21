@@ -1,13 +1,19 @@
-# Blaxel Sandbox Configuration for agentsh
+# Blaxel Sandbox Configuration for agentsh (default: Debian)
 # This template creates a secure sandbox with agentsh runtime security
+#
+# Variants:
+#   - blaxel.toml (this file) - Debian with full shell shim security
+#   - blaxel-alpine.toml - Alpine with limited security (no shell shim)
 
 type = "sandbox"
+name = "agentsh-blaxel"
 
 [runtime]
 # Use mk3 for ultra-fast cold starts
 generation = "mk3"
 # 4GB memory for comfortable operation
 memory = 4096
+# Uses default Dockerfile at root (Debian with full security)
 
 # agentsh server port
 [[runtime.ports]]
