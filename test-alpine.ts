@@ -29,6 +29,37 @@ function getSandboxUrl(): string {
   return data[0]?.metadata?.url
 }
 
+// Wait for sandbox to be ready (cold start can take ~60s)
+async function waitForSandbox(sandboxUrl: string, token: string, maxWait = 90000): Promise<void> {
+  const start = Date.now()
+  while (Date.now() - start < maxWait) {
+    try {
+      const res = await fetch(`${sandboxUrl}/process`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ command: 'echo ready' })
+      })
+      if (res.ok) {
+        const { pid } = await res.json() as { pid: string }
+        for (let i = 0; i < 20; i++) {
+          const status = await fetch(`${sandboxUrl}/process/${pid}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          })
+          const result = await status.json() as ProcessResult
+          if (result.status === 'completed' || result.status === 'failed') return
+          await new Promise(r => setTimeout(r, 500))
+        }
+        return
+      }
+    } catch {
+      // Sandbox not ready yet
+    }
+    process.stdout.write('.')
+    await new Promise(r => setTimeout(r, 5000))
+  }
+  throw new Error('Sandbox did not become ready')
+}
+
 async function runCommand(sandboxUrl: string, token: string, command: string, timeout = 30000): Promise<ProcessResult> {
   const startRes = await fetch(`${sandboxUrl}/process`, {
     method: 'POST',
@@ -81,18 +112,31 @@ async function main() {
     sandboxUrl = getSandboxUrl()
   } catch {
     console.log('\nAlpine sandbox not deployed. Deploying now...')
-    execSync('bl deploy -f blaxel-alpine.toml', { stdio: 'inherit' })
+    // bl deploy always uses ./blaxel.toml and ./Dockerfile — swap both
+    execSync('cp blaxel.toml blaxel.toml.bak && cp blaxel-alpine.toml blaxel.toml', { stdio: 'inherit' })
+    execSync('cp Dockerfile Dockerfile.bak && cp Dockerfile.alpine Dockerfile', { stdio: 'inherit' })
+    try {
+      execSync('bl deploy --yes', { stdio: 'inherit' })
+    } finally {
+      execSync('mv blaxel.toml.bak blaxel.toml', { stdio: 'inherit' })
+      execSync('mv Dockerfile.bak Dockerfile', { stdio: 'inherit' })
+    }
     console.log('Waiting for sandbox to be ready...')
     await new Promise(resolve => setTimeout(resolve, 30000))
     sandboxUrl = getSandboxUrl()
   }
 
   if (!sandboxUrl) {
-    console.error('Sandbox not found. Run: bl deploy -f blaxel-alpine.toml')
+    console.error('Sandbox not found. Deploy with: npx tsx test-alpine.ts (auto-deploys)')
     process.exit(1)
   }
 
-  console.log(`\nSandbox URL: ${sandboxUrl}\n`)
+  console.log(`\nSandbox URL: ${sandboxUrl}`)
+
+  // Wait for sandbox cold start
+  process.stdout.write('Waiting for sandbox to be ready...')
+  await waitForSandbox(sandboxUrl, token)
+  console.log(' ready!\n')
 
   let passed = 0
   let failed = 0
@@ -139,7 +183,7 @@ async function main() {
     })
 
     await test('agentsh version', async () => {
-      const result = await runCommand(sandboxUrl, token, '/usr/bin/agentsh --version 2>&1')
+      const result = await runCommand(sandboxUrl, token, 'agentsh --version 2>&1')
       const output = getOutput(result)
       console.log(`\n    Version: ${output}`)
       return result.exitCode === 0 && output.includes('agentsh')
@@ -164,25 +208,17 @@ async function main() {
     })
 
     // Test Suite 4: Security Features
-    // Note: Alpine has NO shell shim, so commands bypass agentsh policy
+    // Note: Alpine has NO shell shim, so commands bypass agentsh seccomp policy
     // when run through the sandbox-api. These tests verify what works
-    // without the shim (BASH_ENV blocking, network policy).
-    console.log('\n=== Test Suite: Security Features ===')
+    // without the shim: BASH_ENV builtin disabling and network policy.
+    console.log('\n=== Test Suite: Security Features (no shell shim) ===')
 
-    await test('sudo blocked', async () => {
-      const result = await runCommand(sandboxUrl, token, 'sudo echo test 2>&1')
-      return result.exitCode !== 0
-    })
-
-    await test('kill builtin disabled (BASH_ENV)', async () => {
-      const result = await runCommand(sandboxUrl, token, '/bin/bash -c "kill -9 1 2>&1; echo exit=$?"')
+    await test('kill builtin disabled via BASH_ENV', async () => {
+      // BASH_ENV disables bash builtins; kill falls back to /bin/kill
+      const result = await runCommand(sandboxUrl, token, '/bin/bash -c "type kill 2>&1"')
       const output = getOutput(result)
-      return output.includes('exit=127') || output.includes('not found')
-    })
-
-    await test('nc blocked', async () => {
-      const result = await runCommand(sandboxUrl, token, 'nc -h 2>&1')
-      return result.exitCode !== 0
+      // Should show "/bin/kill" (not "kill is a shell builtin")
+      return output.includes('/bin/kill')
     })
 
     await test('allowed domain (github.com)', async () => {

@@ -28,6 +28,37 @@ function getSandboxUrl(): string {
   return data[0]?.metadata?.url
 }
 
+// Wait for sandbox to be ready (cold start can take ~60s)
+async function waitForSandbox(sandboxUrl: string, token: string, maxWait = 90000): Promise<void> {
+  const start = Date.now()
+  while (Date.now() - start < maxWait) {
+    try {
+      const res = await fetch(`${sandboxUrl}/process`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ command: 'echo ready' })
+      })
+      if (res.ok) {
+        const { pid } = await res.json() as { pid: string }
+        for (let i = 0; i < 20; i++) {
+          const status = await fetch(`${sandboxUrl}/process/${pid}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          })
+          const result = await status.json() as ProcessResult
+          if (result.status === 'completed' || result.status === 'failed') return
+          await new Promise(r => setTimeout(r, 500))
+        }
+        return
+      }
+    } catch {
+      // Sandbox not ready yet
+    }
+    process.stdout.write('.')
+    await new Promise(r => setTimeout(r, 5000))
+  }
+  throw new Error('Sandbox did not become ready')
+}
+
 async function runCommand(sandboxUrl: string, token: string, command: string, timeout = 30000): Promise<ProcessResult> {
   const startRes = await fetch(`${sandboxUrl}/process`, {
     method: 'POST',
@@ -85,7 +116,12 @@ async function main() {
     process.exit(1)
   }
 
-  console.log(`\nSandbox URL: ${sandboxUrl}\n`)
+  console.log(`\nSandbox URL: ${sandboxUrl}`)
+
+  // Wait for sandbox cold start
+  process.stdout.write('Waiting for sandbox to be ready...')
+  await waitForSandbox(sandboxUrl, token)
+  console.log(' ready!\n')
 
   let passed = 0
   let failed = 0

@@ -12,8 +12,8 @@ name = "agentsh-blaxel-alpine"
 generation = "mk3"
 # 4GB memory for comfortable operation
 memory = 4096
-# Use Alpine Dockerfile
-dockerfile = "Dockerfile.alpine"
+# NOTE: Blaxel always uses ./Dockerfile — to deploy Alpine,
+# swap Dockerfile.alpine into place (see test-alpine.ts)
 
 # agentsh server port
 [[runtime.ports]]

@@ -20,11 +20,13 @@ The shell shim is the core integration mechanism. It replaces `/bin/sh` and `/bi
 
 ```bash
 bl deploy                    # Deploy Debian variant
-bl deploy -f blaxel-alpine.toml  # Deploy Alpine variant
 npx tsx demo-blocking.ts     # Policy enforcement demo
-npx tsx test-template.ts     # Full test suite
+npx tsx test-template.ts     # Full test suite (15/15 pass)
+npx tsx test-alpine.ts       # Alpine test suite (13/13 pass, auto-deploys)
 bl delete sandbox agentsh-blaxel  # Clean up
 ```
+
+**Blaxel deploy:** `bl deploy` always reads `./blaxel.toml` and `./Dockerfile`. There is NO `-f` flag. To deploy the Alpine variant, swap both files (the test-alpine.ts script does this automatically). The `dockerfile` field in blaxel.toml is not supported — it is silently ignored.
 
 **Cold start timing:** After `bl deploy`, the sandbox needs ~60 seconds before commands work. A 30-second wait is not enough — the pod takes time to provision and the Blaxel service needs to register. If commands fail with "No healthy pods available" / 404, wait longer and retry. Once the first command succeeds, subsequent commands are fast.
 
@@ -60,4 +62,16 @@ When querying APIs from inside the sandbox, use `/usr/bin/agentsh` (full path) t
 
 ## Alpine Limitations
 
-Alpine uses BusyBox which determines applets by argv[0]. Renaming `/bin/sh` to `/bin/sh.real` breaks BusyBox entirely, so the shell shim cannot be installed on Alpine. Alpine variant has no automatic command interception.
+Alpine uses BusyBox which determines applets by argv[0]. Renaming `/bin/sh` to `/bin/sh.real` breaks BusyBox entirely, so the shell shim cannot be installed on Alpine. Alpine variant has no automatic command interception — commands like `sudo`, `nc`, `kill` are NOT blocked by policy.
+
+What DOES work on Alpine:
+- **Network policy** — metadata endpoint blocking, domain allowlist (via agentsh server proxy)
+- **BASH_ENV builtin disabling** — bash builtins (kill, enable, ulimit) are disabled, but the fallback binaries still run since there's no seccomp to block them
+- **DLP/secret redaction** — via agentsh server
+- **Audit logging** — via agentsh server
+
+What does NOT work:
+- **Shell shim / seccomp command blocking** — `sudo`, `nc`, `ssh`, `kill` all succeed
+- `agentsh --version` shows "agentsh dev" (musl build doesn't embed version)
+
+agentsh installs to `/usr/local/bin/agentsh` on Alpine (not `/usr/bin/` like on Debian .deb packages).

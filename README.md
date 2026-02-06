@@ -139,9 +139,14 @@ An Alpine Linux variant is available for smaller image sizes. However, it has **
 
 ```bash
 # Deploy Alpine version (for testing/development only)
-bl deploy -f blaxel-alpine.toml
+# Blaxel always uses ./blaxel.toml and ./Dockerfile — swap both:
+cp blaxel.toml blaxel.toml.bak && cp blaxel-alpine.toml blaxel.toml
+cp Dockerfile Dockerfile.bak && cp Dockerfile.alpine Dockerfile
+bl deploy
+mv blaxel.toml.bak blaxel.toml
+mv Dockerfile.bak Dockerfile
 
-# Run Alpine-specific tests
+# Or just run the test script (auto-deploys if needed):
 npx tsx test-alpine.ts
 ```
 
