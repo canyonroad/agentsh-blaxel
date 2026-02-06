@@ -26,7 +26,7 @@ npx tsx test-template.ts     # Full test suite
 bl delete sandbox agentsh-blaxel  # Clean up
 ```
 
-After deploying, the sandbox needs ~15-30 seconds for cold start before commands work reliably.
+**Cold start timing:** After `bl deploy`, the sandbox needs ~60 seconds before commands work. A 30-second wait is not enough — the pod takes time to provision and the Blaxel service needs to register. If commands fail with "No healthy pods available" / 404, wait longer and retry. Once the first command succeeds, subsequent commands are fast.
 
 ## Version History
 
