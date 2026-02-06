@@ -9,7 +9,6 @@ import { execSync } from 'child_process'
 // and enforced by agentsh policy. No explicit `agentsh exec` calls needed.
 
 const SANDBOX_NAME = 'agentsh-blaxel'
-const AGENTSH_API = 'http://127.0.0.1:18080'
 
 interface ProcessResult {
   pid: string

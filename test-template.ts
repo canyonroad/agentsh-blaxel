@@ -2,7 +2,10 @@ import 'dotenv/config'
 import { execSync } from 'child_process'
 
 // Blaxel sandbox test runner
-// Uses REST API to interact with sandbox
+// Tests agentsh installation, server health, and shell shim
+//
+// Commands run through the sandbox API are intercepted by the
+// agentsh shell shim — output may appear in stdout or logs.
 
 const SANDBOX_NAME = 'agentsh-blaxel'
 
@@ -26,7 +29,6 @@ function getSandboxUrl(): string {
 }
 
 async function runCommand(sandboxUrl: string, token: string, command: string, timeout = 30000): Promise<ProcessResult> {
-  // Start the process
   const startRes = await fetch(`${sandboxUrl}/process`, {
     method: 'POST',
     headers: {
@@ -43,7 +45,6 @@ async function runCommand(sandboxUrl: string, token: string, command: string, ti
   const startData = await startRes.json() as { pid: string }
   const pid = startData.pid
 
-  // Poll for completion
   const startTime = Date.now()
   while (Date.now() - startTime < timeout) {
     const statusRes = await fetch(`${sandboxUrl}/process/${pid}`, {
@@ -62,6 +63,15 @@ async function runCommand(sandboxUrl: string, token: string, command: string, ti
   throw new Error(`Command timed out after ${timeout}ms`)
 }
 
+// Get output from a process result (sandbox may return in stdout or logs)
+function getOutput(result: ProcessResult): string {
+  return (result.stdout || result.logs || '').trim()
+}
+
+function getStderr(result: ProcessResult): string {
+  return (result.stderr || result.logs || '').trim()
+}
+
 async function main() {
   console.log('='.repeat(60))
   console.log('AGENTSH-BLAXEL TEMPLATE TEST')
@@ -77,78 +87,131 @@ async function main() {
 
   console.log(`\nSandbox URL: ${sandboxUrl}\n`)
 
+  let passed = 0
+  let failed = 0
+
+  const test = async (name: string, fn: () => Promise<boolean>) => {
+    process.stdout.write(`  ${name}... `)
+    try {
+      const result = await fn()
+      if (result) {
+        console.log('✓ PASS')
+        passed++
+      } else {
+        console.log('✗ FAIL')
+        failed++
+      }
+    } catch (err) {
+      console.log(`✗ ERROR: ${err}`)
+      failed++
+    }
+  }
+
   try {
-    // Test 1: Check agentsh installation
-    console.log('=== Test 1: Check agentsh installation ===')
-    const versionResult = await runCommand(sandboxUrl, token, 'agentsh --version')
-    console.log(`agentsh version: ${versionResult.stdout.trim()}`)
-    console.log('✓ agentsh installed\n')
+    // Test Suite 1: Installation
+    console.log('\n=== Test Suite: agentsh Installation ===')
 
-    // Test 2: Check CGO/libseccomp support
-    console.log('=== Test 2: Check CGO/libseccomp support ===')
-    const lddResult = await runCommand(sandboxUrl, token, 'ldd /usr/bin/agentsh | grep -E "seccomp|not.*dynamic"')
-    console.log(`Binary linking: ${lddResult.stdout.trim()}`)
-    if (lddResult.stdout.includes('libseccomp')) {
-      console.log('✓ CGO/libseccomp support enabled\n')
-    } else {
-      console.log('✗ WARNING: No libseccomp support - seccomp features disabled\n')
-    }
+    await test('agentsh installed', async () => {
+      const result = await runCommand(sandboxUrl, token, '/usr/bin/agentsh --version 2>&1')
+      const output = getOutput(result)
+      console.log(`\n    Version: ${output}`)
+      return result.exitCode === 0 && output.includes('agentsh')
+    })
 
-    // Test 3: Check agentsh server health
-    console.log('=== Test 3: Check agentsh server ===')
-    const healthResult = await runCommand(sandboxUrl, token, 'curl -s http://127.0.0.1:18080/health')
-    console.log(`Server health: ${healthResult.stdout.trim()}`)
-    if (healthResult.stdout.trim() === 'ok') {
-      console.log('✓ Server is healthy\n')
-    } else {
-      console.log('✗ Server not responding\n')
-    }
+    await test('CGO/libseccomp support', async () => {
+      const result = await runCommand(sandboxUrl, token, 'ldd /usr/bin/agentsh 2>&1 | grep -E "seccomp|not.*dynamic"')
+      const output = getOutput(result)
+      console.log(`\n    Binary linking: ${output}`)
+      return output.includes('libseccomp')
+    })
 
-    // Test 4: Check policy configuration
-    console.log('=== Test 4: Check policy configuration ===')
-    const policyResult = await runCommand(sandboxUrl, token, 'head -15 /etc/agentsh/policies/default.yaml')
-    console.log(`Policy:\n${policyResult.stdout}`)
-    console.log('✓ Policy file exists\n')
+    // Test Suite 2: Server Health
+    console.log('\n=== Test Suite: Server Health ===')
 
-    // Test 5: Check server configuration
-    console.log('=== Test 5: Check server configuration ===')
-    const configResult = await runCommand(sandboxUrl, token, 'head -15 /etc/agentsh/config.yaml')
-    console.log(`Config:\n${configResult.stdout}`)
-    console.log('✓ Config file exists\n')
+    await test('agentsh server healthy', async () => {
+      const result = await runCommand(sandboxUrl, token, 'curl -s http://127.0.0.1:18080/health')
+      return getOutput(result) === 'ok'
+    })
 
-    // Test 6: Test shell shim command execution
-    console.log('=== Test 6: Test shell shim (echo) ===')
-    const echoResult = await runCommand(sandboxUrl, token, 'echo "Hello from agentsh-blaxel!"')
-    console.log(`Echo output: ${echoResult.stdout.trim()}`)
-    if (echoResult.exitCode === 0 && echoResult.stdout.includes('Hello')) {
-      console.log('✓ Shell shim works\n')
-    } else {
-      console.log('✗ Shell shim failed\n')
-    }
+    // Test Suite 3: Configuration
+    console.log('\n=== Test Suite: Configuration ===')
 
-    // Test 7: Test file listing
-    console.log('=== Test 7: Test file listing ===')
-    const lsResult = await runCommand(sandboxUrl, token, 'ls -la /etc/agentsh/')
-    console.log(`ls output:\n${lsResult.stdout}`)
-    if (lsResult.exitCode === 0) {
-      console.log('✓ File listing works\n')
-    } else {
-      console.log('✗ File listing failed\n')
-    }
+    await test('policy file exists', async () => {
+      const result = await runCommand(sandboxUrl, token, 'head -5 /etc/agentsh/policies/default.yaml')
+      return result.exitCode === 0 && getOutput(result).includes('version')
+    })
 
-    // Test 8: Test bash command
-    console.log('=== Test 8: Test bash execution ===')
-    const bashResult = await runCommand(sandboxUrl, token, '/bin/bash -c "echo Current time: $(date)"')
-    console.log(`Bash output: ${bashResult.stdout.trim()}`)
-    if (bashResult.exitCode === 0) {
-      console.log('✓ Bash execution works\n')
-    } else {
-      console.log('✗ Bash execution failed\n')
-    }
+    await test('config file exists', async () => {
+      const result = await runCommand(sandboxUrl, token, 'head -5 /etc/agentsh/config.yaml')
+      return result.exitCode === 0 && getOutput(result).includes('security')
+    })
 
+    // Test Suite 4: Shell Shim
+    console.log('\n=== Test Suite: Shell Shim ===')
+
+    await test('echo through shim', async () => {
+      const result = await runCommand(sandboxUrl, token, 'echo "Hello from agentsh-blaxel!"')
+      return result.exitCode === 0 && getOutput(result).includes('Hello')
+    })
+
+    await test('file listing through shim', async () => {
+      const result = await runCommand(sandboxUrl, token, 'ls /etc/agentsh/')
+      return result.exitCode === 0
+    })
+
+    await test('bash execution through shim', async () => {
+      const result = await runCommand(sandboxUrl, token, '/bin/bash -c "echo bash-ok"')
+      return result.exitCode === 0 && getOutput(result).includes('bash-ok')
+    })
+
+    // Test Suite 5: Policy Enforcement
+    console.log('\n=== Test Suite: Policy Enforcement ===')
+
+    await test('sudo blocked (exit 126)', async () => {
+      const result = await runCommand(sandboxUrl, token, '/usr/bin/sudo whoami')
+      return result.exitCode === 126
+    })
+
+    await test('ssh blocked (exit 126)', async () => {
+      const result = await runCommand(sandboxUrl, token, '/usr/bin/ssh localhost')
+      return result.exitCode === 126
+    })
+
+    await test('kill blocked (exit 126)', async () => {
+      const result = await runCommand(sandboxUrl, token, '/bin/kill -9 1')
+      return result.exitCode === 126
+    })
+
+    await test('rm -rf blocked (exit 126)', async () => {
+      await runCommand(sandboxUrl, token, 'mkdir -p /tmp/testdir && touch /tmp/testdir/f.txt')
+      const result = await runCommand(sandboxUrl, token, '/bin/rm -rf /tmp/testdir')
+      return result.exitCode === 126
+    })
+
+    await test('echo allowed (exit 0)', async () => {
+      const result = await runCommand(sandboxUrl, token, '/bin/echo policy-test')
+      return result.exitCode === 0 && getOutput(result).includes('policy-test')
+    })
+
+    // Test Suite 6: Network Policy
+    console.log('\n=== Test Suite: Network Policy ===')
+
+    await test('allowed domain (github.com)', async () => {
+      const result = await runCommand(sandboxUrl, token, 'curl -s --connect-timeout 5 -o /dev/null -w "%{http_code}" https://api.github.com/')
+      return getOutput(result) === '200'
+    })
+
+    await test('metadata endpoint blocked', async () => {
+      const result = await runCommand(sandboxUrl, token, 'curl -s --connect-timeout 3 http://169.254.169.254/ 2>&1')
+      return result.exitCode !== 0 || getOutput(result) === ''
+    })
+
+    // Summary
+    console.log('\n' + '='.repeat(60))
+    console.log(`RESULTS: ${passed} passed, ${failed} failed`)
     console.log('='.repeat(60))
-    console.log('ALL TESTS COMPLETED')
-    console.log('='.repeat(60))
+
+    process.exit(failed > 0 ? 1 : 0)
 
   } catch (error) {
     console.error('Test failed:', error)

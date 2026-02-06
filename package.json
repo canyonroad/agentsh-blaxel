@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "build": "docker build -t agentsh-blaxel .",
-    "demo:blocking": "npx tsx demo-blocking.ts",
-    "demo:network": "npx tsx demo-network.ts",
-    "demo:all": "npx tsx demo-blocking.ts && npx tsx demo-network.ts",
+    "demo": "npx tsx demo-blocking.ts",
+    "test": "npx tsx test-template.ts",
+    "test:alpine": "npx tsx test-alpine.ts",
     "deploy": "bl deploy"
   },
   "dependencies": {

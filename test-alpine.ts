@@ -3,6 +3,10 @@ import { execSync } from 'child_process'
 
 // Blaxel sandbox test runner for Alpine variant
 // Tests agentsh with musl libc on Alpine Linux
+//
+// NOTE: Alpine does NOT have the shell shim (BusyBox incompatibility).
+// Policy enforcement relies on the agentsh HTTP API / session exec,
+// not automatic shell interception. Output may appear in stdout or logs.
 
 const SANDBOX_NAME = 'agentsh-blaxel-alpine'
 
@@ -60,6 +64,11 @@ async function runCommand(sandboxUrl: string, token: string, command: string, ti
   throw new Error(`Command timed out after ${timeout}ms`)
 }
 
+// Get output from a process result (sandbox may return in stdout or logs)
+function getOutput(result: ProcessResult): string {
+  return (result.stdout || result.logs || '').trim()
+}
+
 async function main() {
   console.log('='.repeat(60))
   console.log('AGENTSH-BLAXEL ALPINE TEST')
@@ -106,20 +115,22 @@ async function main() {
   }
 
   try {
-    // Test 1: Check Alpine/musl
+    // Test Suite 1: Alpine Environment
     console.log('\n=== Test Suite: Alpine Environment ===')
 
-    await test('Check Alpine Linux', async () => {
+    await test('Alpine Linux detected', async () => {
       const result = await runCommand(sandboxUrl, token, 'cat /etc/os-release | grep -i alpine')
-      return result.stdout.toLowerCase().includes('alpine')
+      return getOutput(result).toLowerCase().includes('alpine')
     })
 
-    await test('Check musl libc', async () => {
+    await test('musl libc detected', async () => {
       const result = await runCommand(sandboxUrl, token, 'ldd --version 2>&1 | head -1')
-      return result.stdout.includes('musl') || result.stderr.includes('musl')
+      const output = getOutput(result)
+      const stderr = (result.stderr || result.logs || '').trim()
+      return output.includes('musl') || stderr.includes('musl')
     })
 
-    // Test 2: agentsh installation
+    // Test Suite 2: agentsh Installation
     console.log('\n=== Test Suite: agentsh Installation ===')
 
     await test('agentsh binary exists', async () => {
@@ -128,9 +139,10 @@ async function main() {
     })
 
     await test('agentsh version', async () => {
-      const result = await runCommand(sandboxUrl, token, 'agentsh --version')
-      console.log(`\n    Version: ${result.stdout.trim()}`)
-      return result.exitCode === 0
+      const result = await runCommand(sandboxUrl, token, '/usr/bin/agentsh --version 2>&1')
+      const output = getOutput(result)
+      console.log(`\n    Version: ${output}`)
+      return result.exitCode === 0 && output.includes('agentsh')
     })
 
     await test('agentsh-shell-shim exists', async () => {
@@ -143,58 +155,62 @@ async function main() {
       return result.exitCode === 0
     })
 
-    // Test 3: Server health
+    // Test Suite 3: Server Health
     console.log('\n=== Test Suite: Server Health ===')
 
-    await test('agentsh server health', async () => {
+    await test('agentsh server healthy', async () => {
       const result = await runCommand(sandboxUrl, token, 'curl -s http://127.0.0.1:18080/health')
-      return result.stdout.trim() === 'ok'
+      return getOutput(result) === 'ok'
     })
 
-    // Test 4: Security features
+    // Test Suite 4: Security Features
+    // Note: Alpine has NO shell shim, so commands bypass agentsh policy
+    // when run through the sandbox-api. These tests verify what works
+    // without the shim (BASH_ENV blocking, network policy).
     console.log('\n=== Test Suite: Security Features ===')
 
-    await test('sudo is blocked', async () => {
+    await test('sudo blocked', async () => {
       const result = await runCommand(sandboxUrl, token, 'sudo echo test 2>&1')
       return result.exitCode !== 0
     })
 
-    await test('kill builtin is disabled (BASH_ENV)', async () => {
+    await test('kill builtin disabled (BASH_ENV)', async () => {
       const result = await runCommand(sandboxUrl, token, '/bin/bash -c "kill -9 1 2>&1; echo exit=$?"')
-      return result.stdout.includes('exit=127') || result.stdout.includes('not found')
+      const output = getOutput(result)
+      return output.includes('exit=127') || output.includes('not found')
     })
 
-    await test('nc is blocked', async () => {
+    await test('nc blocked', async () => {
       const result = await runCommand(sandboxUrl, token, 'nc -h 2>&1')
       return result.exitCode !== 0
     })
 
-    await test('curl to allowed domain works', async () => {
-      const result = await runCommand(sandboxUrl, token, 'curl -s --connect-timeout 5 https://api.github.com/ | head -1')
-      return result.exitCode === 0
+    await test('allowed domain (github.com)', async () => {
+      const result = await runCommand(sandboxUrl, token, 'curl -s --connect-timeout 5 -o /dev/null -w "%{http_code}" https://api.github.com/')
+      return getOutput(result) === '200'
     })
 
     await test('metadata endpoint blocked', async () => {
       const result = await runCommand(sandboxUrl, token, 'curl -s --connect-timeout 3 http://169.254.169.254/ 2>&1')
-      return result.exitCode !== 0 || result.stdout.includes('timeout') || result.stdout === ''
+      return result.exitCode !== 0 || getOutput(result) === ''
     })
 
-    // Test 5: Command execution
+    // Test Suite 5: Command Execution
     console.log('\n=== Test Suite: Command Execution ===')
 
     await test('echo command works', async () => {
       const result = await runCommand(sandboxUrl, token, 'echo "Hello from Alpine!"')
-      return result.stdout.includes('Hello from Alpine')
+      return getOutput(result).includes('Hello from Alpine')
     })
 
     await test('bash -c works', async () => {
-      const result = await runCommand(sandboxUrl, token, '/bin/bash -c "echo test"')
-      return result.stdout.includes('test')
+      const result = await runCommand(sandboxUrl, token, '/bin/bash -c "echo bash-ok"')
+      return getOutput(result).includes('bash-ok')
     })
 
-    await test('env shows BASH_ENV', async () => {
+    await test('BASH_ENV is set', async () => {
       const result = await runCommand(sandboxUrl, token, 'env | grep BASH_ENV')
-      return result.stdout.includes('/usr/lib/agentsh/bash_startup.sh')
+      return getOutput(result).includes('/usr/lib/agentsh/bash_startup.sh')
     })
 
     // Summary
