@@ -48,7 +48,7 @@ RUN set -eux; \
     fi
 
 # Verify agentsh installation
-RUN agentsh --version || echo "agentsh installation verification"
+RUN agentsh --version
 
 # Create agentsh directories
 RUN mkdir -p /etc/agentsh/policies \

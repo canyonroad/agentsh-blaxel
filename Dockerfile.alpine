@@ -46,13 +46,20 @@ RUN set -eux; \
     install -m 0755 /tmp/agentsh /usr/local/bin/agentsh; \
     install -m 0755 /tmp/agentsh-shell-shim /usr/local/bin/agentsh-shell-shim 2>/dev/null || true; \
     install -m 0755 /tmp/agentsh-unixwrap /usr/local/bin/agentsh-unixwrap 2>/dev/null || true; \
-    # Install bash_startup.sh for BASH_ENV
+    # Install bash_startup.sh for BASH_ENV (required for builtin blocking)
     mkdir -p /usr/lib/agentsh; \
-    install -m 0755 /tmp/packaging/bash_startup.sh /usr/lib/agentsh/bash_startup.sh 2>/dev/null || true; \
+    if [ -f /tmp/packaging/bash_startup.sh ]; then \
+        install -m 0755 /tmp/packaging/bash_startup.sh /usr/lib/agentsh/bash_startup.sh; \
+    else \
+        echo "WARNING: bash_startup.sh not found in release tarball"; \
+        echo '#!/bin/bash' > /usr/lib/agentsh/bash_startup.sh; \
+        echo 'enable -n kill enable ulimit umask builtin command' >> /usr/lib/agentsh/bash_startup.sh; \
+        chmod 755 /usr/lib/agentsh/bash_startup.sh; \
+    fi; \
     rm -rf /tmp/agentsh* /tmp/packaging
 
 # Verify agentsh installation
-RUN agentsh --version || echo "agentsh installation verification"
+RUN agentsh --version
 
 # Create agentsh directories
 RUN mkdir -p /etc/agentsh/policies \

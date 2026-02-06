@@ -330,17 +330,11 @@ agentsh provides additional security for Blaxel sandboxes beyond standard isolat
 
 ### Blocking Internal API Access
 
-To prevent agents from directly accessing Blaxel's sandbox-api (which could leak process history), add to `default.yaml`:
+**Known limitation:** agentsh network policy does not intercept loopback connections (`127.0.0.1`). Agents can directly access Blaxel's sandbox-api on `localhost:8080`, which leaks process history. To block this, use iptables in the entrypoint:
 
-```yaml
-network_rules:
-  # Block direct access to sandbox-api
-  - name: block-sandbox-api
-    destinations:
-      - "127.0.0.1:8080"
-      - "localhost:8080"
-    decision: deny
-    message: "Direct sandbox-api access not permitted"
+```bash
+# In entrypoint.sh, before starting sandbox-api:
+iptables -A OUTPUT -d 127.0.0.1 -p tcp --dport 8080 -m owner ! --uid-owner root -j DROP
 ```
 
 ## Architecture

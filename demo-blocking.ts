@@ -277,7 +277,7 @@ BLOCKED:
 ALLOWED:
   ✓ echo, pwd, ls      → allow-safe-commands
   ✓ cat, date          → allow-safe-commands
-  ✓ rm (single file)   → redirect-rm-to-safe (quarantined)
+  ✓ rm (single file)   → allow-other-commands
 `)
 
   console.log('Demo completed.')

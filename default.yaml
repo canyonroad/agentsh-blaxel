@@ -107,37 +107,34 @@ file_rules:
       - stat
     decision: allow
 
-  # Require approval for credential access
-  - name: approve-ssh-access
-    description: Require approval for SSH key access
+  # Credential paths - deny (approvals disabled in sandbox, no TTY)
+  - name: block-ssh-keys
+    description: Block access to SSH keys
     paths:
       - "/root/.ssh/**"
     operations:
       - "*"
-    decision: approve
-    message: "Agent wants to access SSH keys: {{.Path}}"
-    timeout: 5m
+    decision: deny
+    message: "SSH key access blocked: {{.Path}}"
 
-  - name: approve-aws-credentials
-    description: Require approval for AWS credentials
+  - name: block-aws-credentials
+    description: Block access to AWS credentials
     paths:
       - "/root/.aws/**"
     operations:
       - "*"
-    decision: approve
-    message: "Agent wants to access AWS credentials: {{.Path}}"
-    timeout: 5m
+    decision: deny
+    message: "AWS credential access blocked: {{.Path}}"
 
-  - name: approve-env-files
-    description: Require approval for .env files
+  - name: block-env-files
+    description: Block access to .env files outside workspace
     paths:
-      - "**/.env"
-      - "**/.env.*"
+      - "/root/.env"
+      - "/root/.env.*"
     operations:
       - "*"
-    decision: approve
-    message: "Agent wants to access environment file: {{.Path}}"
-    timeout: 5m
+    decision: deny
+    message: "Environment file access blocked: {{.Path}}"
 
   # Package caches - read-only
   - name: allow-cache-read
@@ -351,28 +348,14 @@ command_rules:
       - "SSH_ASKPASS"
       - "GIT_SSH_COMMAND"
 
-  # Approve package installation
-  - name: approve-package-install
-    description: Require approval for package installation
-    commands:
-      - npm
-      - pip
-      - pip3
-      - cargo
-    args_patterns:
-      - "^install.*"
-      - "^add.*"
-    decision: approve
-    message: "Agent wants to install packages: {{.Args}}"
-
   # Block dangerous commands
   - name: block-rm-recursive
     description: Block recursive delete
     commands:
       - rm
     args_patterns:
-      - ".*-r.*"
-      - ".*--recursive.*"
+      - "(^|\\s)-[a-zA-Z]*r"
+      - "(^|\\s)--recursive"
     decision: deny
     message: "Recursive delete blocked. Files can be removed individually."
 
@@ -415,58 +398,6 @@ command_rules:
       - nsenter
       - unshare
     decision: deny
-
-  # -------------------------------------------------------------------------
-  # REDIRECT RULES - Steer dangerous commands to safe alternatives
-  # -------------------------------------------------------------------------
-
-  # Redirect curl/wget to audited fetch wrapper
-  - name: redirect-downloads
-    description: Route downloads through audited proxy
-    commands:
-      - curl
-      - wget
-    args_patterns:
-      - ".*http.*"  # Any URL argument
-    decision: redirect
-    redirect_to:
-      command: agentsh-fetch
-      args: ["--audit", "--log", "/var/log/agentsh/downloads.log"]
-    message: "Download redirected through audited proxy"
-
-  # Redirect rm to safe-rm wrapper (moves to quarantine instead of delete)
-  - name: redirect-rm-to-safe
-    description: Redirect rm to quarantine instead of permanent delete
-    commands:
-      - rm
-    args_patterns:
-      - "^[^-].*"  # Files without flags (single file delete)
-    decision: redirect
-    redirect_to:
-      command: agentsh-quarantine
-      args: ["--reason", "rm-redirect"]
-    message: "File moved to quarantine instead of deleted"
-
-  # Redirect cat on sensitive files to redacted output
-  - name: redirect-cat-secrets
-    description: Redirect reading of secret files to redacted version
-    commands:
-      - cat
-      - head
-      - tail
-      - less
-      - more
-    args_patterns:
-      - ".*\\.env.*"
-      - ".*secret.*"
-      - ".*credential.*"
-      - ".*\\.pem$"
-      - ".*\\.key$"
-    decision: redirect
-    redirect_to:
-      command: agentsh-redact
-      args: ["--pattern", "secrets"]
-    message: "Sensitive file content redacted"
 
   # Allow other commands (security enforced via file_rules and network_rules)
   - name: allow-other-commands
