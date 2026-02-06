@@ -30,13 +30,11 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# Function to wait for a port to be available
+# Wait for a port to be available
 wait_for_port() {
     local port=$1
     local timeout=${2:-30}
     local start_time=$(date +%s)
-
-    log_info "Waiting for port $port to be available..."
 
     while ! nc -z localhost "$port" 2>/dev/null; do
         local current_time=$(date +%s)
@@ -49,9 +47,6 @@ wait_for_port() {
 
         sleep 0.5
     done
-
-    log_info "Port $port is available"
-    return 0
 }
 
 # Start agentsh server directly
@@ -68,27 +63,22 @@ start_agentsh_server() {
     agentsh server --config "$AGENTSH_CONFIG" &
     AGENTSH_PID=$!
 
-    # Give it time to start
-    sleep 2
-    if kill -0 $AGENTSH_PID 2>/dev/null; then
-        log_info "agentsh server started (PID: $AGENTSH_PID)"
-        # Verify it's listening
-        if nc -z localhost "$AGENTSH_SERVER_PORT" 2>/dev/null; then
-            log_info "agentsh server listening on port $AGENTSH_SERVER_PORT"
-        else
-            log_warn "agentsh server started but port $AGENTSH_SERVER_PORT not yet ready"
-        fi
+    # Wait for it to start listening
+    if wait_for_port "$AGENTSH_SERVER_PORT" 10; then
+        log_info "agentsh server started (PID: $AGENTSH_PID, port: $AGENTSH_SERVER_PORT)"
     else
-        log_warn "agentsh server may not have started"
+        log_warn "agentsh server started (PID: $AGENTSH_PID) but port not yet ready"
     fi
 }
 
-# Configure environment
+# Configure environment (idempotent)
 configure_environment() {
     log_info "Configuring environment..."
 
-    # Ensure AGENTSH_SERVER is set in /etc/environment for all processes
-    echo "AGENTSH_SERVER=http://127.0.0.1:18080" >> /etc/environment
+    # Write environment file (overwrite, not append — safe on restart)
+    cat > /etc/environment <<EOF
+AGENTSH_SERVER=http://127.0.0.1:18080
+EOF
     export AGENTSH_SERVER=http://127.0.0.1:18080
 }
 
@@ -104,12 +94,10 @@ main() {
         log_info "Starting Blaxel sandbox API..."
         sandbox-api &
         SANDBOX_API_PID=$!
-        # Give it time to start but don't block on port check
-        sleep 2
-        if kill -0 $SANDBOX_API_PID 2>/dev/null; then
-            log_info "Blaxel sandbox API started (PID: $SANDBOX_API_PID)"
+        if wait_for_port 8080 10; then
+            log_info "Blaxel sandbox API started (PID: $SANDBOX_API_PID, port: 8080)"
         else
-            log_warn "sandbox-api may not have started correctly"
+            log_warn "sandbox-api started (PID: $SANDBOX_API_PID) but port not yet ready"
         fi
     else
         log_warn "sandbox-api not found - sandbox process API will not be available"
@@ -129,9 +117,19 @@ main() {
         log_info "Running command: $@"
         exec "$@"
     else
-        # Keep the container running
-        log_info "Sandbox ready. Waiting for commands..."
-        wait
+        # Monitor daemons — exit if either crashes so orchestrator can restart
+        log_info "Sandbox ready. Monitoring daemons..."
+        while true; do
+            if [ -n "$AGENTSH_PID" ] && ! kill -0 $AGENTSH_PID 2>/dev/null; then
+                log_error "agentsh daemon crashed (was PID: $AGENTSH_PID)"
+                exit 1
+            fi
+            if [ -n "$SANDBOX_API_PID" ] && ! kill -0 $SANDBOX_API_PID 2>/dev/null; then
+                log_error "sandbox-api daemon crashed (was PID: $SANDBOX_API_PID)"
+                exit 1
+            fi
+            sleep 5
+        done
     fi
 }
 

@@ -1,5 +1,5 @@
 import 'dotenv/config'
-import { execSync } from 'child_process'
+import { getToken, getSandboxUrl, waitForSandbox, runCommand, getOutput, type AgentshEvent } from './sandbox-utils.js'
 
 // Blaxel sandbox policy blocking demo
 // Demonstrates agentsh policy enforcement via the shell shim
@@ -9,107 +9,6 @@ import { execSync } from 'child_process'
 // and enforced by agentsh policy. No explicit `agentsh exec` calls needed.
 
 const SANDBOX_NAME = 'agentsh-blaxel'
-
-interface ProcessResult {
-  pid: string
-  status: string
-  exitCode: number
-  stdout: string
-  stderr: string
-  logs: string
-}
-
-interface AgentshEvent {
-  id: string
-  type: string
-  session_id: string
-  policy: {
-    decision: string
-    effective_decision: string
-    rule: string
-    message?: string
-  }
-  filename?: string
-  argv?: string[]
-  effective_action?: string
-}
-
-function getToken(): string {
-  return execSync('bl token', { encoding: 'utf-8' }).trim()
-}
-
-function getSandboxUrl(): string {
-  const output = execSync(`bl get sandbox ${SANDBOX_NAME} -o json`, { encoding: 'utf-8' })
-  const data = JSON.parse(output)
-  return data[0]?.metadata?.url
-}
-
-// Wait for sandbox to be ready (cold start can take ~60s)
-async function waitForSandbox(sandboxUrl: string, token: string, maxWait = 90000): Promise<void> {
-  const start = Date.now()
-  while (Date.now() - start < maxWait) {
-    try {
-      const res = await fetch(`${sandboxUrl}/process`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ command: 'echo ready' })
-      })
-      if (res.ok) {
-        const { pid } = await res.json() as { pid: string }
-        // Wait for the echo to complete
-        for (let i = 0; i < 20; i++) {
-          const status = await fetch(`${sandboxUrl}/process/${pid}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-          })
-          const result = await status.json() as ProcessResult
-          if (result.status === 'completed' || result.status === 'failed') return
-          await new Promise(r => setTimeout(r, 500))
-        }
-        return
-      }
-    } catch {
-      // Sandbox not ready yet
-    }
-    process.stdout.write('.')
-    await new Promise(r => setTimeout(r, 5000))
-  }
-  throw new Error('Sandbox did not become ready')
-}
-
-async function runCommand(sandboxUrl: string, token: string, command: string, timeout = 30000): Promise<ProcessResult> {
-  const startRes = await fetch(`${sandboxUrl}/process`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`
-    },
-    body: JSON.stringify({ command })
-  })
-
-  if (!startRes.ok) {
-    throw new Error(`Failed to start process: ${await startRes.text()}`)
-  }
-
-  const startData = await startRes.json() as { pid: string }
-  const pid = startData.pid
-
-  const startTime = Date.now()
-  while (Date.now() - startTime < timeout) {
-    const statusRes = await fetch(`${sandboxUrl}/process/${pid}`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    })
-
-    const result = await statusRes.json() as ProcessResult
-
-    if (result.status === 'completed' || result.status === 'failed') {
-      return result
-    }
-
-    await new Promise(resolve => setTimeout(resolve, 500))
-  }
-
-  throw new Error(`Command timed out after ${timeout}ms`)
-}
 
 // Query agentsh events to find the policy rule that blocked a command
 async function getBlockedRule(sandboxUrl: string, token: string, command: string): Promise<string | null> {
@@ -138,7 +37,7 @@ async function main() {
   console.log('='.repeat(60))
 
   const token = getToken()
-  const sandboxUrl = getSandboxUrl()
+  const sandboxUrl = getSandboxUrl(SANDBOX_NAME)
 
   if (!sandboxUrl) {
     console.error('Sandbox not found. Run: bl deploy')
@@ -154,7 +53,7 @@ async function main() {
 
   // Verify agentsh is running
   const versionResult = await runCommand(sandboxUrl, token, '/usr/bin/agentsh --version 2>&1')
-  console.log(`agentsh version: ${(versionResult.stdout || versionResult.logs).trim()}`)
+  console.log(`agentsh version: ${getOutput(versionResult)}`)
   console.log('Shell shim active: commands enforced via /bin/sh interception\n')
 
   // Helper to run a command and report result
@@ -166,7 +65,7 @@ async function main() {
 
       if (result.exitCode === 0) {
         console.log(`✓ ALLOWED (exit: ${result.exitCode})`)
-        const output = (result.stdout || result.logs).trim()
+        const output = getOutput(result)
         if (output) {
           console.log(`  Output: ${output.split('\n')[0]}`)
         }
@@ -184,8 +83,9 @@ async function main() {
         }
         return false
       }
-    } catch (e: any) {
-      console.log(`✗ ERROR: ${e.message}`)
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.log(`✗ ERROR: ${message}`)
       return false
     }
   }

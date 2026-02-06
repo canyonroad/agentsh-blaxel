@@ -459,7 +459,9 @@ env_policy:
     - "DYLD_*"
 
     # Shell injection vectors
-    - "BASH_ENV"
+    # NOTE: BASH_ENV is NOT denied here — it's in the allow list and provided
+    # via env_inject in config.yaml for builtin blocking. User-supplied BASH_ENV
+    # values are overridden by env_inject.
     - "ENV"
     - "PROMPT_COMMAND"
     - "SHELLOPTS"
