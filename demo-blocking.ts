@@ -2,9 +2,14 @@ import 'dotenv/config'
 import { execSync } from 'child_process'
 
 // Blaxel sandbox policy blocking demo
-// Demonstrates agentsh policy enforcement
+// Demonstrates agentsh policy enforcement via the shell shim
+//
+// Architecture: The agentsh shell shim replaces /bin/sh and /bin/bash,
+// so ALL commands run through the sandbox API are automatically intercepted
+// and enforced by agentsh policy. No explicit `agentsh exec` calls needed.
 
 const SANDBOX_NAME = 'agentsh-blaxel'
+const AGENTSH_API = 'http://127.0.0.1:18080'
 
 interface ProcessResult {
   pid: string
@@ -13,6 +18,21 @@ interface ProcessResult {
   stdout: string
   stderr: string
   logs: string
+}
+
+interface AgentshEvent {
+  id: string
+  type: string
+  session_id: string
+  policy: {
+    decision: string
+    effective_decision: string
+    rule: string
+    message?: string
+  }
+  filename?: string
+  argv?: string[]
+  effective_action?: string
 }
 
 function getToken(): string {
@@ -60,6 +80,27 @@ async function runCommand(sandboxUrl: string, token: string, command: string, ti
   throw new Error(`Command timed out after ${timeout}ms`)
 }
 
+// Query agentsh events to find the policy rule that blocked a command
+async function getBlockedRule(sandboxUrl: string, token: string, command: string): Promise<string | null> {
+  try {
+    const result = await runCommand(sandboxUrl, token,
+      `/usr/bin/agentsh events query --decision deny --type execve --limit 5 2>&1`, 10000)
+    const output = result.stdout || result.logs
+    const events: AgentshEvent[] = JSON.parse(output)
+
+    // Find the event matching our command
+    const basename = command.split('/').pop() || command
+    for (const event of events) {
+      if (event.argv?.[0]?.includes(basename) || event.filename?.includes(basename)) {
+        return event.policy.rule
+      }
+    }
+  } catch {
+    // Events query failed, return null
+  }
+  return null
+}
+
 async function main() {
   console.log('='.repeat(60))
   console.log('AGENTSH POLICY BLOCKING DEMO')
@@ -75,48 +116,35 @@ async function main() {
 
   console.log(`\nSandbox URL: ${sandboxUrl}\n`)
 
-  // Create a session first
-  console.log('=== Creating agentsh session ===')
-  const sessionResult = await runCommand(sandboxUrl, token,
-    'agentsh session create --workspace /app --json')
-  let sessionId: string
-  try {
-    const sessionData = JSON.parse(sessionResult.stdout)
-    sessionId = sessionData.id
-    console.log(`Session ID: ${sessionId}\n`)
-  } catch {
-    // Fallback session name
-    sessionId = 'demo-session'
-    console.log(`Using session: ${sessionId}\n`)
-  }
+  // Verify agentsh is running
+  const versionResult = await runCommand(sandboxUrl, token, '/usr/bin/agentsh --version 2>&1')
+  console.log(`agentsh version: ${(versionResult.stdout || versionResult.logs).trim()}`)
+  console.log('Shell shim active: commands enforced via /bin/sh interception\n')
 
-  // Helper to run command via agentsh exec
-  async function runAgentsh(description: string, cmd: string, args: string[] = []): Promise<boolean> {
+  // Helper to run a command and report result
+  async function testCommand(description: string, command: string): Promise<boolean> {
     console.log(`\n--- ${description} ---`)
 
-    const fullCmd = args.length > 0
-      ? `agentsh exec ${sessionId} --timeout 15s -- ${cmd} ${args.map(a => `"${a}"`).join(' ')}`
-      : `agentsh exec ${sessionId} --timeout 15s -- ${cmd}`
-
     try {
-      const result = await runCommand(sandboxUrl, token, fullCmd, 20000)
+      const result = await runCommand(sandboxUrl, token, command, 15000)
 
       if (result.exitCode === 0) {
         console.log(`✓ ALLOWED (exit: ${result.exitCode})`)
-        if (result.stdout.trim()) {
-          console.log(`  Output: ${result.stdout.trim().split('\n')[0]}`)
+        const output = (result.stdout || result.logs).trim()
+        if (output) {
+          console.log(`  Output: ${output.split('\n')[0]}`)
         }
         return true
+      } else if (result.exitCode === 126) {
+        // Exit 126 = command blocked by seccomp policy
+        const rule = await getBlockedRule(sandboxUrl, token, command.split(' ')[0])
+        console.log(`✗ BLOCKED by ${rule || 'policy'} (exit: 126)`)
+        return false
       } else {
-        const output = result.stdout + result.stderr + result.logs
-        if (output.includes('denied') || output.includes('blocked') || output.includes('not permitted')) {
-          const ruleMatch = output.match(/rule[=:]([^\s\)]+)/)
-          const rule = ruleMatch ? ruleMatch[1] : 'policy'
-          console.log(`✗ BLOCKED by ${rule}`)
-        } else if (output.includes('no such file')) {
-          console.log(`✗ NOT FOUND (command not installed)`)
-        } else {
-          console.log(`✗ FAILED (exit: ${result.exitCode})`)
+        console.log(`✗ FAILED (exit: ${result.exitCode})`)
+        const stderr = (result.stderr || '').trim()
+        if (stderr) {
+          console.log(`  Error: ${stderr.split('\n')[0]}`)
         }
         return false
       }
@@ -126,36 +154,36 @@ async function main() {
     }
   }
 
-  console.log('\n' + '='.repeat(60))
+  console.log('='.repeat(60))
   console.log('1. ALLOWED COMMANDS')
   console.log('='.repeat(60))
 
-  await runAgentsh('/bin/echo Hello', '/bin/echo', ['Hello'])
-  await runAgentsh('/bin/pwd', '/bin/pwd')
-  await runAgentsh('/bin/ls /app', '/bin/ls', ['/app'])
-  await runAgentsh('/bin/date', '/bin/date')
-  await runAgentsh('/bin/cat /etc/hostname', '/bin/cat', ['/etc/hostname'])
+  await testCommand('echo Hello', 'echo Hello')
+  await testCommand('pwd', 'pwd')
+  await testCommand('ls /app', 'ls /app')
+  await testCommand('date', 'date')
+  await testCommand('cat /etc/hostname', 'cat /etc/hostname')
 
   console.log('\n' + '='.repeat(60))
   console.log('2. BLOCKED: Privilege Escalation')
   console.log('='.repeat(60))
 
-  await runAgentsh('/usr/bin/sudo whoami', '/usr/bin/sudo', ['whoami'])
-  await runAgentsh('/bin/su -', '/bin/su', ['-'])
+  await testCommand('/usr/bin/sudo whoami', '/usr/bin/sudo whoami')
+  await testCommand('/bin/su -', '/bin/su -')
 
   console.log('\n' + '='.repeat(60))
   console.log('3. BLOCKED: Network Tools')
   console.log('='.repeat(60))
 
-  await runAgentsh('/usr/bin/ssh localhost', '/usr/bin/ssh', ['localhost'])
-  await runAgentsh('/bin/nc -h', '/bin/nc', ['-h'])
+  await testCommand('/usr/bin/ssh localhost', '/usr/bin/ssh localhost')
+  await testCommand('nc -h', 'nc -h')
 
   console.log('\n' + '='.repeat(60))
   console.log('4. BLOCKED: System Commands')
   console.log('='.repeat(60))
 
-  await runAgentsh('/bin/kill -9 1', '/bin/kill', ['-9', '1'])
-  await runAgentsh('/sbin/shutdown now', '/sbin/shutdown', ['now'])
+  await testCommand('/bin/kill -9 1', '/bin/kill -9 1')
+  await testCommand('/sbin/shutdown now', '/sbin/shutdown now')
 
   console.log('\n' + '='.repeat(60))
   console.log('5. BLOCKED: Recursive Delete')
@@ -164,8 +192,8 @@ async function main() {
   // Create test directory first
   await runCommand(sandboxUrl, token, 'mkdir -p /tmp/test && touch /tmp/test/file.txt')
 
-  await runAgentsh('/bin/rm -rf /tmp/test', '/bin/rm', ['-rf', '/tmp/test'])
-  await runAgentsh('/bin/rm -r /tmp/test', '/bin/rm', ['-r', '/tmp/test'])
+  await testCommand('/bin/rm -rf /tmp/test', '/bin/rm -rf /tmp/test')
+  await testCommand('/bin/rm -r /tmp/test', '/bin/rm -r /tmp/test')
 
   console.log('\n' + '='.repeat(60))
   console.log('6. ALLOWED: Single File Delete')
@@ -173,24 +201,47 @@ async function main() {
 
   // Create test file
   await runCommand(sandboxUrl, token, 'mkdir -p /tmp/test && touch /tmp/test/file.txt')
-  await runAgentsh('/bin/rm /tmp/test/file.txt', '/bin/rm', ['/tmp/test/file.txt'])
+  await testCommand('rm /tmp/test/file.txt', 'rm /tmp/test/file.txt')
+
+  // Show full audit trail
+  console.log('\n' + '='.repeat(60))
+  console.log('7. AUDIT TRAIL (recent blocked events)')
+  console.log('='.repeat(60))
+
+  try {
+    const eventsResult = await runCommand(sandboxUrl, token,
+      '/usr/bin/agentsh events query --decision deny --type execve --limit 10 2>&1', 10000)
+    const events: AgentshEvent[] = JSON.parse(eventsResult.stdout || eventsResult.logs)
+    console.log('')
+    for (const event of events) {
+      const cmd = event.argv?.join(' ') || event.filename || 'unknown'
+      const rule = event.policy.rule
+      const msg = event.policy.message ? ` - ${event.policy.message}` : ''
+      console.log(`  ✗ ${cmd.padEnd(30)} rule: ${rule}${msg}`)
+    }
+  } catch {
+    console.log('  (unable to query events)')
+  }
 
   console.log('\n' + '='.repeat(60))
   console.log('SUMMARY')
   console.log('='.repeat(60))
   console.log(`
-agentsh policy enforcement in action:
+agentsh policy enforcement via shell shim:
+
+  The shell shim (/bin/sh, /bin/bash) intercepts ALL commands
+  and enforces policy at the seccomp/execve level.
 
 BLOCKED:
-  ✗ sudo, su           → Privilege escalation blocked
-  ✗ ssh, nc            → Network tools blocked
-  ✗ kill, shutdown     → System commands blocked
-  ✗ rm -r, rm -rf      → Recursive delete blocked
+  ✗ sudo, su           → block-shell-escape
+  ✗ ssh, nc            → block-network-tools
+  ✗ kill, shutdown     → block-system-commands
+  ✗ rm -r, rm -rf      → block-rm-recursive
 
 ALLOWED:
-  ✓ echo, pwd, ls      → Standard commands
-  ✓ cat, date          → File reading, utilities
-  ✓ rm (single file)   → Non-recursive delete
+  ✓ echo, pwd, ls      → allow-safe-commands
+  ✓ cat, date          → allow-safe-commands
+  ✓ rm (single file)   → redirect-rm-to-safe (quarantined)
 `)
 
   console.log('Demo completed.')
