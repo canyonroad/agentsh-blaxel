@@ -1,6 +1,6 @@
 # agentsh + Blaxel
 
-Runtime security governance for AI agents using [agentsh](https://github.com/canyonroad/agentsh) with [Blaxel](https://blaxel.ai) sandboxes.
+Runtime security governance for AI agents using [agentsh](https://github.com/canyonroad/agentsh) v0.9.2 with [Blaxel](https://blaxel.ai) sandboxes.
 
 ## Why agentsh + Blaxel?
 
@@ -106,10 +106,18 @@ npm install
 bl deploy
 ```
 
-### 2. Run the Tests
+### 2. Run the Demo
 
 ```bash
-# Run the security test suite
+# Run the policy enforcement demo
+npx tsx demo-blocking.ts
+```
+
+The demo runs commands directly through the sandbox — the agentsh shell shim (`/bin/sh`) automatically intercepts every command and enforces policy at the seccomp/execve level. No explicit `agentsh exec` calls needed.
+
+### 3. Run the Full Test Suite
+
+```bash
 npx tsx test-template.ts
 ```
 
@@ -139,7 +147,42 @@ npx tsx test-alpine.ts
 
 **Recommendation:** Use the Debian variant for production workloads requiring full security.
 
-Expected output:
+Expected output from `demo-blocking.ts`:
+```
+AGENTSH POLICY BLOCKING DEMO
+============================================================
+agentsh version: agentsh 0.9.2+...
+Shell shim active: commands enforced via /bin/sh interception
+
+1. ALLOWED COMMANDS
+  ✓ echo Hello          → ALLOWED (exit: 0)
+  ✓ pwd                 → ALLOWED (exit: 0)
+  ✓ ls, date, cat       → ALLOWED (exit: 0)
+
+2. BLOCKED: Privilege Escalation
+  ✗ sudo whoami         → BLOCKED by block-shell-escape (exit: 126)
+  ✗ su -                → BLOCKED by block-shell-escape (exit: 126)
+
+3. BLOCKED: Network Tools
+  ✗ ssh localhost        → BLOCKED by block-network-tools (exit: 126)
+
+4. BLOCKED: System Commands
+  ✗ kill -9 1            → BLOCKED by block-system-commands (exit: 126)
+  ✗ shutdown now         → BLOCKED by block-system-commands (exit: 126)
+
+5. BLOCKED: Recursive Delete
+  ✗ rm -rf /tmp/test     → BLOCKED by block-rm-recursive (exit: 126)
+
+6. ALLOWED: Single File Delete
+  ✓ rm /tmp/test/file    → ALLOWED (exit: 0)
+
+7. AUDIT TRAIL (recent blocked events)
+  ✗ /bin/rm -rf /tmp/test   rule: block-rm-recursive
+  ✗ /usr/bin/sudo whoami     rule: block-shell-escape
+  ...
+```
+
+Expected output from `test-template.ts`:
 ```
 agentsh + Blaxel: Security Feature Tests
 ============================================================
@@ -182,6 +225,7 @@ agentsh-blaxel/
 │                        # - network_rules
 │                        # - command_rules
 │                        # - env_policy
+├── demo-blocking.ts     # Policy blocking demo (shell shim)
 ├── test-template.ts     # Security test suite (Debian)
 ├── test-alpine.ts       # Security test suite (Alpine)
 └── package.json         # Node.js dependencies
@@ -295,6 +339,34 @@ network_rules:
 ```
 
 ## Architecture
+
+The shell shim is the key integration point. agentsh replaces `/bin/sh` and `/bin/bash` with a shim that routes every command through the agentsh policy engine:
+
+```
+sandbox-api runs: /bin/sh -c "sudo whoami"
+                     │
+                     ▼
+            ┌─────────────────┐
+            │  Shell Shim     │  /bin/sh → agentsh-shell-shim
+            │  (intercepts)   │
+            └────────┬────────┘
+                     │
+                     ▼
+            ┌─────────────────┐
+            │  agentsh exec   │  Auto-creates session, enforces policy
+            │  (seccomp +     │  via seccomp execve interception
+            │   unixwrap)     │
+            └────────┬────────┘
+                     │
+              ┌──────┴──────┐
+              ▼             ▼
+        ┌──────────┐  ┌──────────┐
+        │  ALLOW   │  │  BLOCK   │
+        │ exit: 0  │  │ exit: 126│
+        └──────────┘  └──────────┘
+```
+
+Full system view:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
