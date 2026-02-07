@@ -118,7 +118,7 @@ The demo runs commands directly through the sandbox — the agentsh shell shim (
 ### 3. Run the Full Test Suite
 
 ```bash
-npx tsx test-template.ts
+npx tsx test-debian.ts
 ```
 
 ### Alpine Variant
@@ -187,7 +187,7 @@ Shell shim active: commands enforced via /bin/sh interception
   ...
 ```
 
-Expected output from `test-template.ts`:
+Expected output from `test-debian.ts`:
 ```
 agentsh + Blaxel: Security Feature Tests
 ============================================================
@@ -231,7 +231,7 @@ agentsh-blaxel/
 │                        # - command_rules
 │                        # - env_policy
 ├── demo-blocking.ts     # Policy blocking demo (shell shim)
-├── test-template.ts     # Security test suite (Debian)
+├── test-debian.ts       # Security test suite (Debian)
 ├── test-alpine.ts       # Security test suite (Alpine)
 └── package.json         # Node.js dependencies
 ```
@@ -322,20 +322,17 @@ agentsh provides additional security for Blaxel sandboxes beyond standard isolat
 
 | Threat | Without agentsh | With agentsh |
 |--------|-----------------|--------------|
-| **Process history disclosure** | Agents can list all processes via `localhost:8080/process` | Network policy blocks internal API access |
+| **Process history disclosure** | Agents can list all processes via `localhost:8080/process` | **Not mitigated** (see below) |
 | **Internal DNS probing** | Agents could enumerate Blaxel's internal DNS (172.16.x.x) | Private network ranges blocked |
-| **Sandbox-api manipulation** | Direct API calls could bypass intended workflows | All commands routed through agentsh policy |
+| **Sandbox-api manipulation** | Direct API calls could bypass intended workflows | **Partially mitigated** — commands routed through agentsh policy, but sandbox-api is still reachable |
 | **Signal attacks** | Bash `kill` builtin could signal sandbox-api/agentsh | Builtins disabled via BASH_ENV |
 | **Cloud credential theft** | Agents could access 169.254.169.254 metadata | Metadata endpoint blocked |
 
 ### Blocking Internal API Access
 
-**Known limitation:** agentsh network policy does not intercept loopback connections (`127.0.0.1`). Agents can directly access Blaxel's sandbox-api on `localhost:8080`, which leaks process history. To block this, use iptables in the entrypoint:
+**Known limitation:** agentsh network policy does not intercept loopback connections (`127.0.0.1`). All processes in the Blaxel container run as root, so iptables owner-based rules cannot distinguish agent commands from system daemons.
 
-```bash
-# In entrypoint.sh, before starting sandbox-api:
-iptables -A OUTPUT -d 127.0.0.1 -p tcp --dport 8080 -m owner ! --uid-owner root -j DROP
-```
+Agents can directly access Blaxel's sandbox-api on `localhost:8080`, which leaks process history. Mitigations require changes at the Blaxel platform level (e.g., sandbox-api authentication for local requests, Unix socket instead of TCP, or running agent commands as a non-root user).
 
 ## Architecture
 
@@ -448,7 +445,7 @@ resource_limits:
 Run the full test suite:
 
 ```bash
-npx tsx test-template.ts
+npx tsx test-debian.ts
 ```
 
 Test individual features:

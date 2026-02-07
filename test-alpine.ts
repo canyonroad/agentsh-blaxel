@@ -161,6 +161,31 @@ async function main() {
       return getOutput(result).includes('/usr/lib/agentsh/bash_startup.sh')
     })
 
+    // Test Suite 6: Environment Policy
+    console.log('\n=== Test Suite: Environment Policy ===')
+
+    await test('env filtered to safe vars only', async () => {
+      const result = await runCommand(sandboxUrl, token, 'env | sort')
+      const output = getOutput(result)
+      const blocked = ['AWS_', 'AZURE_', 'GOOGLE_', 'OPENAI_', 'ANTHROPIC_', 'LD_PRELOAD', 'LD_LIBRARY_PATH']
+      for (const prefix of blocked) {
+        if (output.includes(prefix)) return false
+      }
+      return output.includes('HOME=') && output.includes('PATH=')
+    })
+
+    await test('policy-test: sudo denied', async () => {
+      const result = await runCommand(sandboxUrl, token, 'agentsh debug policy-test --op exec --path sudo --json 2>&1')
+      const output = getOutput(result)
+      return output.includes('"deny"') && output.includes('block-shell-escape')
+    })
+
+    await test('policy-test: echo allowed', async () => {
+      const result = await runCommand(sandboxUrl, token, 'agentsh debug policy-test --op exec --path echo --json 2>&1')
+      const output = getOutput(result)
+      return output.includes('"allow"') && output.includes('allow-safe-commands')
+    })
+
     // Summary
     console.log('\n' + '='.repeat(60))
     console.log(`RESULTS: ${passed} passed, ${failed} failed`)

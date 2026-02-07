@@ -52,8 +52,16 @@ RUN set -eux; \
         install -m 0755 /tmp/packaging/bash_startup.sh /usr/lib/agentsh/bash_startup.sh; \
     else \
         echo "WARNING: bash_startup.sh not found in release tarball"; \
-        echo '#!/bin/bash' > /usr/lib/agentsh/bash_startup.sh; \
-        echo 'enable -n kill enable ulimit umask builtin command' >> /usr/lib/agentsh/bash_startup.sh; \
+        printf '%s\n' \
+            '#!/bin/bash' \
+            '# Disable builtins that bypass seccomp policy enforcement' \
+            'enable -n kill      # Signal sending' \
+            'enable -n enable    # Prevent re-enabling' \
+            'enable -n ulimit    # Resource limits' \
+            'enable -n umask     # File permission mask' \
+            'enable -n builtin   # Force builtin bypass' \
+            'enable -n command   # Function/alias bypass' \
+            > /usr/lib/agentsh/bash_startup.sh; \
         chmod 755 /usr/lib/agentsh/bash_startup.sh; \
     fi; \
     rm -rf /tmp/agentsh* /tmp/packaging

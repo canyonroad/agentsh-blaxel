@@ -6,7 +6,7 @@
   "scripts": {
     "build": "docker build -t agentsh-blaxel .",
     "demo": "npx tsx demo-blocking.ts",
-    "test": "npx tsx test-template.ts",
+    "test": "npx tsx test-debian.ts",
     "test:alpine": "npx tsx test-alpine.ts",
     "deploy": "bl deploy"
   },

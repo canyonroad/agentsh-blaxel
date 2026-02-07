@@ -11,7 +11,7 @@ const SANDBOX_NAME = 'agentsh-blaxel'
 
 async function main() {
   console.log('='.repeat(60))
-  console.log('AGENTSH-BLAXEL TEMPLATE TEST')
+  console.log('AGENTSH-BLAXEL DEBIAN TEST')
   console.log('='.repeat(60))
 
   const token = getToken()
@@ -147,6 +147,38 @@ async function main() {
     await test('metadata endpoint blocked', async () => {
       const result = await runCommand(sandboxUrl, token, 'curl -s --connect-timeout 3 http://169.254.169.254/ 2>&1')
       return result.exitCode !== 0 || getOutput(result) === ''
+    })
+
+    // Test Suite 7: Environment Policy
+    console.log('\n=== Test Suite: Environment Policy ===')
+
+    await test('env filtered to safe vars only', async () => {
+      const result = await runCommand(sandboxUrl, token, 'env | sort')
+      const output = getOutput(result)
+      // Should NOT contain any cloud credentials or API keys
+      const blocked = ['AWS_', 'AZURE_', 'GOOGLE_', 'OPENAI_', 'ANTHROPIC_', 'LD_PRELOAD', 'LD_LIBRARY_PATH']
+      for (const prefix of blocked) {
+        if (output.includes(prefix)) return false
+      }
+      // Should contain basic safe vars
+      return output.includes('HOME=') && output.includes('PATH=')
+    })
+
+    await test('BASH_ENV passed through', async () => {
+      const result = await runCommand(sandboxUrl, token, 'echo $BASH_ENV')
+      return getOutput(result).includes('/usr/lib/agentsh/bash_startup.sh')
+    })
+
+    await test('policy-test: sudo denied', async () => {
+      const result = await runCommand(sandboxUrl, token, '/usr/bin/agentsh debug policy-test --op exec --path sudo --json 2>&1')
+      const output = getOutput(result)
+      return output.includes('"deny"') && output.includes('block-shell-escape')
+    })
+
+    await test('policy-test: echo allowed', async () => {
+      const result = await runCommand(sandboxUrl, token, '/usr/bin/agentsh debug policy-test --op exec --path echo --json 2>&1')
+      const output = getOutput(result)
+      return output.includes('"allow"') && output.includes('allow-safe-commands')
     })
 
     // Summary

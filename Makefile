@@ -1,4 +1,4 @@
-.PHONY: build run clean deploy demo-blocking demo-network demo-all install
+.PHONY: build run clean deploy demo-blocking install test test-alpine
 
 # Build the Docker image locally
 build:
@@ -30,12 +30,12 @@ deploy:
 demo-blocking: install
 	npx tsx demo-blocking.ts
 
-# Run network policy demo
-demo-network: install
-	npx tsx demo-network.ts
+# Run tests
+test: install
+	npx tsx test-debian.ts
 
-# Run all demos
-demo-all: demo-blocking demo-network
+test-alpine: install
+	npx tsx test-alpine.ts
 
 # Clean up
 clean:
@@ -53,6 +53,6 @@ help:
 	@echo "  make install        Install npm dependencies"
 	@echo "  make deploy         Deploy to Blaxel"
 	@echo "  make demo-blocking  Run command blocking demo"
-	@echo "  make demo-network   Run network policy demo"
-	@echo "  make demo-all       Run all demos"
+	@echo "  make test           Run Debian test suite"
+	@echo "  make test-alpine    Run Alpine test suite"
 	@echo "  make clean          Remove image and node_modules"

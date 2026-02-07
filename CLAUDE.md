@@ -21,7 +21,7 @@ The shell shim is the core integration mechanism. It replaces `/bin/sh` and `/bi
 ```bash
 bl deploy                    # Deploy Debian variant
 npx tsx demo-blocking.ts     # Policy enforcement demo
-npx tsx test-template.ts     # Full test suite (15/15 pass)
+npx tsx test-debian.ts     # Full test suite (15/15 pass)
 npx tsx test-alpine.ts       # Alpine test suite (13/13 pass, auto-deploys)
 bl delete sandbox agentsh-blaxel  # Clean up
 ```
@@ -58,7 +58,7 @@ When querying APIs from inside the sandbox, use `/usr/bin/agentsh` (full path) t
 - `default.yaml` — Security policy (file_rules, network_rules, command_rules, env_policy)
 - `debian/entrypoint.sh` — Uses `#!/bin/bash.real` (not `/bin/bash`) because bash IS the shim
 - `demo-blocking.ts` — Runs commands directly through sandbox API, checks exit codes, queries events for rule names
-- `test-template.ts` / `test-alpine.ts` — Full test suites
+- `test-debian.ts` / `test-alpine.ts` — Full test suites
 
 ## Alpine Limitations
 
