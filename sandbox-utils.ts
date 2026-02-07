@@ -28,7 +28,7 @@ export function getToken(): string {
   return execSync('bl token', { encoding: 'utf-8' }).trim()
 }
 
-export function getSandboxUrl(sandboxName: string): string {
+export function getSandboxUrl(sandboxName: string): string | undefined {
   const output = execSync(`bl get sandbox ${sandboxName} -o json`, { encoding: 'utf-8' })
   const data = JSON.parse(output)
   return data[0]?.metadata?.url

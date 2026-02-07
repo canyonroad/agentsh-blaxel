@@ -44,7 +44,24 @@ RUN set -eux; \
         install -m 0755 /tmp/agentsh-shell-shim /usr/local/bin/agentsh-shell-shim 2>/dev/null || true; \
         install -m 0755 /tmp/agentsh-unixwrap /usr/local/bin/agentsh-unixwrap 2>/dev/null || true; \
         install -m 0755 /tmp/libenvshim.so /usr/local/lib/libenvshim.so 2>/dev/null || true; \
-        rm -rf /tmp/agentsh*; \
+        # Install bash_startup.sh for BASH_ENV (required for builtin blocking)
+        mkdir -p /usr/lib/agentsh; \
+        if [ -f /tmp/packaging/bash_startup.sh ]; then \
+            install -m 0755 /tmp/packaging/bash_startup.sh /usr/lib/agentsh/bash_startup.sh; \
+        else \
+            printf '%s\n' \
+                '#!/bin/bash' \
+                '# Disable builtins that bypass seccomp policy enforcement' \
+                'enable -n kill      # Signal sending' \
+                'enable -n enable    # Prevent re-enabling' \
+                'enable -n ulimit    # Resource limits' \
+                'enable -n umask     # File permission mask' \
+                'enable -n builtin   # Force builtin bypass' \
+                'enable -n command   # Function/alias bypass' \
+                > /usr/lib/agentsh/bash_startup.sh; \
+            chmod 755 /usr/lib/agentsh/bash_startup.sh; \
+        fi; \
+        rm -rf /tmp/agentsh* /tmp/packaging; \
     fi
 
 # Verify agentsh installation
