@@ -11,6 +11,7 @@ COPY --from=ghcr.io/blaxel-ai/sandbox:latest /sandbox-api /usr/local/bin/sandbox
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     curl \
+    fuse3 \
     git \
     jq \
     libseccomp2 \
@@ -21,7 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Set agentsh version (use latest stable)
-ARG AGENTSH_VERSION=0.9.2
+ARG AGENTSH_VERSION=0.9.8
 
 # Download and install agentsh
 # Use .deb package for Debian-based systems, fall back to tar.gz

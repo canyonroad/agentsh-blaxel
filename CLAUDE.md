@@ -21,8 +21,8 @@ The shell shim is the core integration mechanism. It replaces `/bin/sh` and `/bi
 ```bash
 bl deploy                    # Deploy Debian variant
 npx tsx demo-blocking.ts     # Policy enforcement demo
-npx tsx test-debian.ts     # Full test suite (15/15 pass)
-npx tsx test-alpine.ts       # Alpine test suite (13/13 pass, auto-deploys)
+npx tsx test-debian.ts     # Full test suite (30/30 pass)
+npx tsx test-alpine.ts       # Alpine test suite (16/16 pass, auto-deploys)
 bl delete sandbox agentsh-blaxel  # Clean up
 ```
 
@@ -32,8 +32,21 @@ bl delete sandbox agentsh-blaxel  # Clean up
 
 ## Version History
 
-- **0.9.2** (current) - Shell shim works, `agentsh exec` CLI hangs when nested through shim. Demo uses direct commands + events query API for policy rule names.
-- **0.8.10** (previous) - Nested `agentsh exec` through shim worked (or appeared to).
+- **0.9.8** (current) - FUSE file I/O enforcement working (requires `fuse3` package). Shell shim works, `agentsh exec` CLI hangs when nested through shim. Demo uses direct commands + events query API for policy rule names.
+- **0.9.2** (previous) - Shell shim works, `agentsh exec` CLI hangs when nested through shim. FUSE not working (missing `fuse3` package).
+- **0.8.10** (legacy) - Nested `agentsh exec` through shim worked (or appeared to).
+
+## FUSE File I/O Enforcement
+
+**Requirement:** The `fuse3` Debian package must be installed for FUSE to work. Without it, the agentsh server silently fails to mount the FUSE filesystem (`fuse_mount_failed` metric). The Go FUSE library needs the `fusermount3` binary.
+
+**How it works:**
+- agentsh mounts a FUSE filesystem at `/var/lib/agentsh/sessions/<session-id>/workspace-mnt`
+- The workspace maps to `/app` (the agent's working directory)
+- FUSE intercepts `file_stat` and `dir_list` operations and checks them against `file_rules`
+- Metric `agentsh_events_by_type_total{type="fuse_mounted"}` = 1 confirms FUSE is active
+
+**Critical policy lesson (learned 2026-02-12):** When FUSE is enabled, the `file_rules` default-deny catches `stat` and `list` operations from the FUSE filesystem. Even though FUSE only mounts at the workspace path, it generates many stat calls that hit the policy evaluator. The policy MUST include an `allow-stat-everywhere` rule allowing `stat`, `list`, and `readlink` on `**` (all paths), placed before the default-deny. Without this, ALL commands fail with exit 127 ("agentsh: command failed"). The actual write/create/delete enforcement is handled by path-specific rules above the catchall.
 
 ## How Policy Blocking Manifests
 

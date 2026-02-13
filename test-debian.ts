@@ -181,6 +181,74 @@ async function main() {
       return output.includes('"allow"') && output.includes('allow-safe-commands')
     })
 
+    // Test Suite 8: File I/O Policy (FUSE/landlock)
+    console.log('\n=== Test Suite: File I/O Policy ===')
+
+    // Policy evaluation tests — verify file_rules are loaded and evaluate correctly
+    await test('policy-test: workspace write allowed', async () => {
+      const result = await runCommand(sandboxUrl, token, '/usr/bin/agentsh debug policy-test --op write --path /app/test.txt --json 2>&1')
+      const output = getOutput(result)
+      return output.includes('"allow"') && output.includes('allow-workspace-write')
+    })
+
+    await test('policy-test: workspace read allowed', async () => {
+      const result = await runCommand(sandboxUrl, token, '/usr/bin/agentsh debug policy-test --op read --path /app/test.txt --json 2>&1')
+      const output = getOutput(result)
+      return output.includes('"allow"') && output.includes('allow-workspace-read')
+    })
+
+    await test('policy-test: tmp write allowed', async () => {
+      const result = await runCommand(sandboxUrl, token, '/usr/bin/agentsh debug policy-test --op write --path /tmp/test.txt --json 2>&1')
+      const output = getOutput(result)
+      return output.includes('"allow"') && output.includes('allow-tmp')
+    })
+
+    await test('policy-test: workspace delete is soft-delete', async () => {
+      const result = await runCommand(sandboxUrl, token, '/usr/bin/agentsh debug policy-test --op delete --path /app/test.txt --json 2>&1')
+      const output = getOutput(result)
+      return output.includes('soft-delete-workspace')
+    })
+
+    await test('policy-test: SSH key access denied', async () => {
+      const result = await runCommand(sandboxUrl, token, '/usr/bin/agentsh debug policy-test --op read --path /root/.ssh/id_rsa --json 2>&1')
+      const output = getOutput(result)
+      return output.includes('"deny"') && output.includes('block-ssh-keys')
+    })
+
+    await test('policy-test: AWS credentials denied', async () => {
+      const result = await runCommand(sandboxUrl, token, '/usr/bin/agentsh debug policy-test --op read --path /root/.aws/credentials --json 2>&1')
+      const output = getOutput(result)
+      return output.includes('"deny"') && output.includes('block-aws-credentials')
+    })
+
+    await test('policy-test: system path write denied', async () => {
+      const result = await runCommand(sandboxUrl, token, '/usr/bin/agentsh debug policy-test --op write --path /usr/bin/testfile --json 2>&1')
+      const output = getOutput(result)
+      return output.includes('"deny"') && output.includes('default-deny-files')
+    })
+
+    await test('policy-test: /etc write denied', async () => {
+      const result = await runCommand(sandboxUrl, token, '/usr/bin/agentsh debug policy-test --op write --path /etc/test.txt --json 2>&1')
+      const output = getOutput(result)
+      return output.includes('"deny"') && output.includes('default-deny-files')
+    })
+
+    // Actual file I/O enforcement tests — verify FUSE/landlock enforces file_rules
+    await test('write to /app succeeds', async () => {
+      const result = await runCommand(sandboxUrl, token, 'echo "fileio-test" > /app/fileio-test.txt && cat /app/fileio-test.txt')
+      return result.exitCode === 0 && getOutput(result).includes('fileio-test')
+    })
+
+    await test('write to /tmp succeeds', async () => {
+      const result = await runCommand(sandboxUrl, token, 'echo "tmp-test" > /tmp/fileio-test.txt && cat /tmp/fileio-test.txt')
+      return result.exitCode === 0 && getOutput(result).includes('tmp-test')
+    })
+
+    await test('read system files succeeds', async () => {
+      const result = await runCommand(sandboxUrl, token, 'cat /etc/hostname')
+      return result.exitCode === 0 && getOutput(result).length > 0
+    })
+
     // Summary
     console.log('\n' + '='.repeat(60))
     console.log(`RESULTS: ${passed} passed, ${failed} failed`)

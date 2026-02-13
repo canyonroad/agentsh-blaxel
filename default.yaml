@@ -12,6 +12,18 @@ description: |
 # =============================================================================
 
 file_rules:
+  # agentsh internal paths - full access (operator-controlled, not agent-accessible)
+  # Required for shell shim session files, server config, event logging
+  - name: allow-agentsh-internal
+    description: Full access to agentsh runtime directories
+    paths:
+      - "/var/lib/agentsh/**"
+      - "/var/log/agentsh/**"
+      - "/etc/agentsh/**"
+    operations:
+      - "*"
+    decision: allow
+
   # Workspace - read/write allowed, deletes are soft (recoverable)
   - name: allow-workspace-read
     description: Allow reading files in workspace
@@ -79,7 +91,7 @@ file_rules:
 
   # System paths - read-only
   - name: allow-system-read
-    description: Read access to system paths
+    description: Read-only access to system paths
     paths:
       - "/usr/**"
       - "/lib/**"
@@ -94,17 +106,52 @@ file_rules:
       - readlink
     decision: allow
 
-  - name: allow-etc-minimal
-    description: Read minimal config files
+  - name: allow-etc-read
+    description: Read system configuration files
     paths:
-      - "/etc/hosts"
-      - "/etc/resolv.conf"
-      - "/etc/ssl/certs/**"
-      - "/etc/ca-certificates/**"
-      - "/etc/localtime"
+      - "/etc/**"
     operations:
       - read
+      - open
       - stat
+      - list
+      - readlink
+    decision: allow
+
+  # Virtual and runtime filesystems
+  - name: allow-proc
+    description: Access to /proc (process info)
+    paths:
+      - "/proc/**"
+    operations:
+      - "*"
+    decision: allow
+
+  - name: allow-dev
+    description: Access to device files
+    paths:
+      - "/dev/**"
+    operations:
+      - "*"
+    decision: allow
+
+  - name: allow-run
+    description: Access to runtime state
+    paths:
+      - "/run/**"
+    operations:
+      - read
+      - open
+      - stat
+      - list
+    decision: allow
+
+  - name: allow-var-log
+    description: Access to log files
+    paths:
+      - "/var/log/**"
+    operations:
+      - "*"
     decision: allow
 
   # Credential paths - deny (approvals disabled in sandbox, no TTY)
@@ -136,10 +183,11 @@ file_rules:
     decision: deny
     message: "Environment file access blocked: {{.Path}}"
 
-  # Package caches - read-only
+  # Package caches and home directory - read-only
   - name: allow-cache-read
-    description: Read-only cache access
+    description: Read-only cache and home access
     paths:
+      - "/root/**"
       - "/root/.npm/**"
       - "/root/.cache/**"
       - "/root/.cargo/**"
@@ -150,7 +198,19 @@ file_rules:
       - list
     decision: allow
 
-  # Deny all other file operations
+  # Allow stat/list everywhere (FUSE intercepts these on the workspace mount)
+  # Write/create/delete still controlled by path-specific rules above
+  - name: allow-stat-everywhere
+    description: Allow stat and directory listing on all paths
+    paths:
+      - "**"
+    operations:
+      - stat
+      - list
+      - readlink
+    decision: allow
+
+  # Deny all other file operations (write, create, delete, etc.)
   - name: default-deny-files
     description: Deny all other file operations
     paths:
