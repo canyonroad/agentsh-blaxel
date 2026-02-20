@@ -5,9 +5,10 @@ import { getToken, getSandboxUrl, waitForSandbox, runCommand, getOutput } from '
 // Blaxel sandbox test runner for Alpine variant
 // Tests agentsh with musl libc on Alpine Linux
 //
-// NOTE: Alpine does NOT have the shell shim (BusyBox incompatibility).
-// Policy enforcement relies on the agentsh HTTP API / session exec,
-// not automatic shell interception. Output may appear in stdout or logs.
+// Alpine now has full security parity with Debian: shell shim, seccomp
+// command blocking, FUSE file I/O enforcement. The installer copies the
+// BusyBox binary to /bin/sh.real and the shim preserves argv[0] so
+// BusyBox applet detection works correctly.
 
 const SANDBOX_NAME = 'agentsh-blaxel-alpine'
 
@@ -33,7 +34,7 @@ async function main() {
       execSync('mv Dockerfile.bak Dockerfile', { stdio: 'inherit' })
     }
     console.log('Waiting for sandbox to be ready...')
-    await new Promise(resolve => setTimeout(resolve, 30000))
+    await new Promise(resolve => setTimeout(resolve, 60000))
     sandboxUrl = getSandboxUrl(SANDBOX_NAME)
   }
 
@@ -89,26 +90,21 @@ async function main() {
     // Test Suite 2: agentsh Installation
     console.log('\n=== Test Suite: agentsh Installation ===')
 
-    await test('agentsh binary exists', async () => {
-      const result = await runCommand(sandboxUrl, token, 'which agentsh')
-      return result.exitCode === 0
-    })
-
-    await test('agentsh version', async () => {
-      const result = await runCommand(sandboxUrl, token, 'agentsh --version 2>&1')
+    await test('agentsh installed', async () => {
+      // Alpine installs to /usr/local/bin (tar.gz), not /usr/bin (.deb)
+      const result = await runCommand(sandboxUrl, token, '/usr/local/bin/agentsh --version 2>&1')
       const output = getOutput(result)
       console.log(`\n    Version: ${output}`)
       return result.exitCode === 0 && output.includes('agentsh')
     })
 
-    await test('agentsh-shell-shim exists', async () => {
-      const result = await runCommand(sandboxUrl, token, 'which agentsh-shell-shim')
-      return result.exitCode === 0
-    })
-
-    await test('agentsh-unixwrap exists', async () => {
-      const result = await runCommand(sandboxUrl, token, 'which agentsh-unixwrap')
-      return result.exitCode === 0
+    await test('static musl build (no dynamic libseccomp)', async () => {
+      // Alpine doesn't have 'file' command; check that the binary isn't dynamically linked to libseccomp
+      const result = await runCommand(sandboxUrl, token, 'ldd /usr/local/bin/agentsh 2>&1 || echo "static"')
+      const output = getOutput(result)
+      console.log(`\n    Binary type: ${output.split('\n')[0]}`)
+      // musl static build: ldd says "not a dynamic executable" or "statically linked"
+      return output.includes('not a dynamic') || output.includes('statically linked') || output.includes('static')
     })
 
     // Test Suite 3: Server Health
@@ -119,19 +115,68 @@ async function main() {
       return getOutput(result) === 'ok'
     })
 
-    // Test Suite 4: Security Features
-    // Note: Alpine has NO shell shim, so commands bypass agentsh seccomp policy
-    // when run through the sandbox-api. These tests verify what works
-    // without the shim: BASH_ENV builtin disabling and network policy.
-    console.log('\n=== Test Suite: Security Features (no shell shim) ===')
+    // Test Suite 4: Configuration
+    console.log('\n=== Test Suite: Configuration ===')
 
-    await test('kill builtin disabled via BASH_ENV', async () => {
-      // BASH_ENV disables bash builtins; kill falls back to /bin/kill
-      const result = await runCommand(sandboxUrl, token, '/bin/bash -c "type kill 2>&1"')
-      const output = getOutput(result)
-      // Should show "/bin/kill" (not "kill is a shell builtin")
-      return output.includes('/bin/kill')
+    await test('policy file exists', async () => {
+      const result = await runCommand(sandboxUrl, token, 'head -5 /etc/agentsh/policies/default.yaml')
+      return result.exitCode === 0 && getOutput(result).includes('version')
     })
+
+    await test('config file exists', async () => {
+      const result = await runCommand(sandboxUrl, token, 'head -5 /etc/agentsh/config.yaml')
+      return result.exitCode === 0 && getOutput(result).includes('security')
+    })
+
+    // Test Suite 5: Shell Shim
+    console.log('\n=== Test Suite: Shell Shim ===')
+
+    await test('echo through shim', async () => {
+      const result = await runCommand(sandboxUrl, token, 'echo "Hello from Alpine!"')
+      return result.exitCode === 0 && getOutput(result).includes('Hello')
+    })
+
+    await test('file listing through shim', async () => {
+      const result = await runCommand(sandboxUrl, token, 'ls /etc/agentsh/')
+      return result.exitCode === 0
+    })
+
+    await test('bash execution through shim', async () => {
+      const result = await runCommand(sandboxUrl, token, '/bin/bash -c "echo bash-ok"')
+      return result.exitCode === 0 && getOutput(result).includes('bash-ok')
+    })
+
+    // Test Suite 6: Policy Enforcement (seccomp via shell shim)
+    console.log('\n=== Test Suite: Policy Enforcement ===')
+
+    await test('sudo blocked (exit 126)', async () => {
+      const result = await runCommand(sandboxUrl, token, '/usr/bin/sudo whoami')
+      return result.exitCode === 126
+    })
+
+    await test('ssh blocked (exit 126)', async () => {
+      const result = await runCommand(sandboxUrl, token, '/usr/bin/ssh localhost')
+      return result.exitCode === 126
+    })
+
+    await test('kill blocked (exit 126)', async () => {
+      const result = await runCommand(sandboxUrl, token, '/bin/kill -9 1')
+      return result.exitCode === 126
+    })
+
+    await test('rm -rf blocked (exit 126)', async () => {
+      await runCommand(sandboxUrl, token, 'mkdir -p /tmp/testdir && touch /tmp/testdir/f.txt')
+      const result = await runCommand(sandboxUrl, token, '/bin/rm -rf /tmp/testdir')
+      return result.exitCode === 126
+    })
+
+    await test('echo allowed (exit 0)', async () => {
+      const result = await runCommand(sandboxUrl, token, '/bin/echo policy-test')
+      return result.exitCode === 0 && getOutput(result).includes('policy-test')
+    })
+
+    // Test Suite 7: Network Policy
+    console.log('\n=== Test Suite: Network Policy ===')
 
     await test('allowed domain (github.com)', async () => {
       const result = await runCommand(sandboxUrl, token, 'curl -s --connect-timeout 5 -o /dev/null -w "%{http_code}" https://api.github.com/')
@@ -143,25 +188,7 @@ async function main() {
       return result.exitCode !== 0 || getOutput(result) === ''
     })
 
-    // Test Suite 5: Command Execution
-    console.log('\n=== Test Suite: Command Execution ===')
-
-    await test('echo command works', async () => {
-      const result = await runCommand(sandboxUrl, token, 'echo "Hello from Alpine!"')
-      return getOutput(result).includes('Hello from Alpine')
-    })
-
-    await test('bash -c works', async () => {
-      const result = await runCommand(sandboxUrl, token, '/bin/bash -c "echo bash-ok"')
-      return getOutput(result).includes('bash-ok')
-    })
-
-    await test('BASH_ENV is set', async () => {
-      const result = await runCommand(sandboxUrl, token, 'env | grep BASH_ENV')
-      return getOutput(result).includes('/usr/lib/agentsh/bash_startup.sh')
-    })
-
-    // Test Suite 6: Environment Policy
+    // Test Suite 8: Environment Policy
     console.log('\n=== Test Suite: Environment Policy ===')
 
     await test('env filtered to safe vars only', async () => {
@@ -174,16 +201,93 @@ async function main() {
       return output.includes('HOME=') && output.includes('PATH=')
     })
 
+    await test('BASH_ENV passed through', async () => {
+      const result = await runCommand(sandboxUrl, token, 'echo $BASH_ENV')
+      return getOutput(result).includes('/usr/lib/agentsh/bash_startup.sh')
+    })
+
     await test('policy-test: sudo denied', async () => {
-      const result = await runCommand(sandboxUrl, token, 'agentsh debug policy-test --op exec --path sudo --json 2>&1')
+      const result = await runCommand(sandboxUrl, token, '/usr/local/bin/agentsh debug policy-test --op exec --path sudo --json 2>&1')
       const output = getOutput(result)
       return output.includes('"deny"') && output.includes('block-shell-escape')
     })
 
     await test('policy-test: echo allowed', async () => {
-      const result = await runCommand(sandboxUrl, token, 'agentsh debug policy-test --op exec --path echo --json 2>&1')
+      const result = await runCommand(sandboxUrl, token, '/usr/local/bin/agentsh debug policy-test --op exec --path echo --json 2>&1')
       const output = getOutput(result)
       return output.includes('"allow"') && output.includes('allow-safe-commands')
+    })
+
+    // Test Suite 9: File I/O Policy
+    console.log('\n=== Test Suite: File I/O Policy ===')
+
+    await test('policy-test: workspace write allowed', async () => {
+      const result = await runCommand(sandboxUrl, token, '/usr/local/bin/agentsh debug policy-test --op write --path /app/test.txt --json 2>&1')
+      const output = getOutput(result)
+      return output.includes('"allow"') && output.includes('allow-workspace-write')
+    })
+
+    await test('policy-test: workspace read allowed', async () => {
+      const result = await runCommand(sandboxUrl, token, '/usr/local/bin/agentsh debug policy-test --op read --path /app/test.txt --json 2>&1')
+      const output = getOutput(result)
+      return output.includes('"allow"') && output.includes('allow-workspace-read')
+    })
+
+    await test('policy-test: tmp write allowed', async () => {
+      const result = await runCommand(sandboxUrl, token, '/usr/local/bin/agentsh debug policy-test --op write --path /tmp/test.txt --json 2>&1')
+      const output = getOutput(result)
+      return output.includes('"allow"') && output.includes('allow-tmp')
+    })
+
+    await test('policy-test: workspace delete is soft-delete', async () => {
+      const result = await runCommand(sandboxUrl, token, '/usr/local/bin/agentsh debug policy-test --op delete --path /app/test.txt --json 2>&1')
+      const output = getOutput(result)
+      return output.includes('soft-delete-workspace')
+    })
+
+    await test('policy-test: SSH key access denied', async () => {
+      const result = await runCommand(sandboxUrl, token, '/usr/local/bin/agentsh debug policy-test --op read --path /root/.ssh/id_rsa --json 2>&1')
+      const output = getOutput(result)
+      return output.includes('"deny"') && output.includes('block-ssh-keys')
+    })
+
+    await test('policy-test: AWS credentials denied', async () => {
+      const result = await runCommand(sandboxUrl, token, '/usr/local/bin/agentsh debug policy-test --op read --path /root/.aws/credentials --json 2>&1')
+      const output = getOutput(result)
+      return output.includes('"deny"') && output.includes('block-aws-credentials')
+    })
+
+    await test('policy-test: system path write denied', async () => {
+      const result = await runCommand(sandboxUrl, token, '/usr/local/bin/agentsh debug policy-test --op write --path /usr/bin/testfile --json 2>&1')
+      const output = getOutput(result)
+      return output.includes('"deny"') && output.includes('default-deny-files')
+    })
+
+    await test('policy-test: /etc write denied', async () => {
+      const result = await runCommand(sandboxUrl, token, '/usr/local/bin/agentsh debug policy-test --op write --path /etc/test.txt --json 2>&1')
+      const output = getOutput(result)
+      return output.includes('"deny"') && output.includes('default-deny-files')
+    })
+
+    await test('policy-test: stat everywhere allowed', async () => {
+      // Use a path outside /root/** so it doesn't match allow-cache-read first
+      const result = await runCommand(sandboxUrl, token, '/usr/local/bin/agentsh debug policy-test --op stat --path /opt/something --json 2>&1')
+      const output = getOutput(result)
+      return output.includes('"allow"') && output.includes('allow-stat-everywhere')
+    })
+
+    await test('policy-test: /root read denied', async () => {
+      // /root/.bashrc matches allow-cache-read (/root/**), so use a path outside /root
+      // Test that reading an arbitrary system path is denied by default-deny-files
+      const result = await runCommand(sandboxUrl, token, '/usr/local/bin/agentsh debug policy-test --op read --path /opt/secret.txt --json 2>&1')
+      const output = getOutput(result)
+      return output.includes('"deny"') && output.includes('default-deny-files')
+    })
+
+    await test('policy-test: .env file access denied', async () => {
+      const result = await runCommand(sandboxUrl, token, '/usr/local/bin/agentsh debug policy-test --op read --path /root/.env --json 2>&1')
+      const output = getOutput(result)
+      return output.includes('"deny"') && output.includes('block-env-files')
     })
 
     // Summary

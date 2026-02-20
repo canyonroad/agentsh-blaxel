@@ -3,7 +3,7 @@
 #
 # Variants:
 #   - blaxel.toml (this file) - Debian with full shell shim security
-#   - blaxel-alpine.toml - Alpine with limited security (no shell shim)
+#   - blaxel-alpine.toml - Alpine with full security parity
 
 type = "sandbox"
 name = "agentsh-blaxel"

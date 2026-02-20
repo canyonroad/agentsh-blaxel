@@ -16,13 +16,21 @@ The shell shim is the core integration mechanism. It replaces `/bin/sh` and `/bi
 
 **Critical lesson (learned 2026-02-05):** Do NOT call `agentsh exec` explicitly when the shell shim is active. The shim already wraps every command in `agentsh exec`. Calling it explicitly causes nested wrapping (`agentsh exec` inside `agentsh exec`) which hangs in agentsh 0.9.2+. The old `demo-blocking.ts` had this bug — it was fixed by running commands directly and letting the shim handle enforcement.
 
+**Non-TTY bypass and AGENTSH_SHIM_FORCE (learned 2026-02-19):** In agentsh 0.10.1+, the shell shim bypasses enforcement when stdin is not a TTY (PR #96). Since Blaxel's sandbox-api always runs commands without a TTY, this breaks policy enforcement. The fix (agentsh 0.10.2+) adds `AGENTSH_SHIM_FORCE=1` env var to override the bypass.
+
+**Critical: Do NOT set AGENTSH_SHIM_FORCE as a Dockerfile ENV.** Setting it globally causes all commands to hang because the very first `/bin/sh` call from sandbox-api tries to route through `agentsh exec` with session auto-creation, which blocks. Instead, the entrypoint must:
+1. Start the agentsh server first
+2. Pre-create a session with `agentsh session create --policy default --json`
+3. Export `AGENTSH_SESSION_ID` and `AGENTSH_SHIM_FORCE=1` so sandbox-api inherits them
+This way the shim has a ready session and never needs to auto-create one.
+
 ## Deploying and Testing
 
 ```bash
 bl deploy                    # Deploy Debian variant
 npx tsx demo-blocking.ts     # Policy enforcement demo
 npx tsx test-debian.ts     # Full test suite (30/30 pass)
-npx tsx test-alpine.ts       # Alpine test suite (16/16 pass, auto-deploys)
+npx tsx test-alpine.ts       # Alpine test suite (32/32 pass, auto-deploys)
 bl delete sandbox agentsh-blaxel  # Clean up
 ```
 
@@ -32,7 +40,9 @@ bl delete sandbox agentsh-blaxel  # Clean up
 
 ## Version History
 
-- **0.9.8** (current) - FUSE file I/O enforcement working (requires `fuse3` package). Shell shim works, `agentsh exec` CLI hangs when nested through shim. Demo uses direct commands + events query API for policy rule names.
+- **0.10.2** (current) - Adds `AGENTSH_SHIM_FORCE=1` env var to override the non-TTY stdin bypass in the shell shim. Required for sandbox platforms (Blaxel, E2B) where commands run without a TTY but still need policy enforcement.
+- **0.10.1** - Shell shim bypasses enforcement when stdin is not a TTY (PR #96). Breaks Blaxel integration since sandbox-api runs commands without TTY. Use 0.10.2+ with `AGENTSH_SHIM_FORCE=1`.
+- **0.9.8** (previous) - FUSE file I/O enforcement working (requires `fuse3` package). Shell shim works, `agentsh exec` CLI hangs when nested through shim. Demo uses direct commands + events query API for policy rule names.
 - **0.9.2** (previous) - Shell shim works, `agentsh exec` CLI hangs when nested through shim. FUSE not working (missing `fuse3` package).
 - **0.8.10** (legacy) - Nested `agentsh exec` through shim worked (or appeared to).
 
@@ -67,24 +77,26 @@ When querying APIs from inside the sandbox, use `/usr/bin/agentsh` (full path) t
 ## File Layout
 
 - `Dockerfile` / `Dockerfile.alpine` — Container definitions, `AGENTSH_VERSION` ARG sets the version
-- `config.yaml` — agentsh server config (security mode, DLP patterns, proxy, env_inject)
+- `config.yaml` — agentsh server config (security mode, DLP patterns, proxy, env_inject, FUSE)
 - `default.yaml` — Security policy (file_rules, network_rules, command_rules, env_policy)
-- `debian/entrypoint.sh` — Uses `#!/bin/bash.real` (not `/bin/bash`) because bash IS the shim
+- `debian/entrypoint.sh` — Uses `#!/bin/bash.real` (not `/bin/bash`) because bash IS the shim. Pre-creates session and exports `AGENTSH_SHIM_FORCE=1`.
+- `alpine/entrypoint.sh` — Uses `#!/bin/bash.real` (same as Debian). Pre-creates session and exports `AGENTSH_SHIM_FORCE=1`.
+- `sandbox-utils.ts` — Shared sandbox API utilities (command exec, deploy helpers)
 - `demo-blocking.ts` — Runs commands directly through sandbox API, checks exit codes, queries events for rule names
-- `test-debian.ts` / `test-alpine.ts` — Full test suites
+- `test-debian.ts` / `test-alpine.ts` — Full test suites (Debian 30 tests, Alpine 32 tests)
 
-## Alpine Limitations
+## Alpine Notes
 
-Alpine uses BusyBox which determines applets by argv[0]. Renaming `/bin/sh` to `/bin/sh.real` breaks BusyBox entirely, so the shell shim cannot be installed on Alpine. Alpine variant has no automatic command interception — commands like `sudo`, `nc`, `kill` are NOT blocked by policy.
+Alpine now has **full security parity** with Debian. The shell shim works correctly on Alpine/BusyBox.
 
-What DOES work on Alpine:
-- **Network policy** — metadata endpoint blocking, domain allowlist (via agentsh server proxy)
-- **BASH_ENV builtin disabling** — bash builtins (kill, enable, ulimit) are disabled, but the fallback binaries still run since there's no seccomp to block them
-- **DLP/secret redaction** — via agentsh server
-- **Audit logging** — via agentsh server
+**How the shim works on BusyBox (corrected 2026-02-19):** BusyBox uses `argv[0]` for applet detection, but `agentsh exec` runs `/bin/sh.real` with `argv[0]="sh.real"` — which BusyBox doesn't recognize ("applet not found"). The fix in `Dockerfile.alpine`: replace the BusyBox `/bin/sh` symlink with a link to bash *before* shim install (`rm -f /bin/sh && ln -s /bin/bash /bin/sh`). The installer then copies bash (not BusyBox) to `/bin/sh.real`. Bash ignores `argv[0]`, so it works correctly regardless of how it's invoked. The agentsh CI already tests the shim on Alpine (see `Dockerfile.test.alpine` in the agentsh repo).
 
-What does NOT work:
-- **Shell shim / seccomp command blocking** — `sudo`, `nc`, `ssh`, `kill` all succeed
+The previous claim that "BusyBox's symlink-based applet detection is incompatible with the shim" was incorrect — the incompatibility is specifically with `agentsh exec`'s argv[0] handling, and is solved by using bash instead of BusyBox as the underlying shell.
+
+**Alpine-specific differences:**
+- Binary path: `/usr/local/bin/agentsh` (tar.gz install), not `/usr/bin/agentsh` (.deb install)
+- Shim install uses `--shim /usr/local/bin/agentsh-shell-shim` (not `/usr/bin/`)
+- musl build is statically linked with libseccomp (`CGO_ENABLED=1 CGO_LDFLAGS="-static -lseccomp"`)
+- Architecture: amd64 only (no arm64 musl build)
 - `agentsh --version` shows "agentsh dev" (musl build doesn't embed version)
-
-agentsh installs to `/usr/local/bin/agentsh` on Alpine (not `/usr/bin/` like on Debian .deb packages).
+- Requires `fuse3` apk package for FUSE file I/O enforcement

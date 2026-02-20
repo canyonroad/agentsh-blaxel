@@ -1,17 +1,12 @@
 # Blaxel Sandbox with agentsh Runtime Security (Alpine/musl)
-# Alpine-based variant using musl libc
+# Alpine-based variant using musl libc with full security parity with Debian.
 #
-# NOTE: This variant does NOT install the shell shim because BusyBox's
-# symlink-based applet detection is incompatible with the shim approach.
-# Security features available:
-#   - Network policy enforcement (via agentsh server)
-#   - DLP/secret redaction
-#   - Audit logging
-#   - BASH_ENV builtin blocking (when bash is explicitly used)
-# NOT available:
-#   - Automatic shell interception (commands via sandbox-api bypass policy)
+# BusyBox compatibility: Alpine's /bin/sh is a BusyBox symlink. BusyBox uses
+# argv[0] for applet detection, but agentsh exec sets argv[0] to the binary
+# path ("sh.real"), not "sh". Fix: replace /bin/sh with a bash symlink before
+# shim install. The installer copies bash (which ignores argv[0]) to sh.real.
 #
-# For full security, use the Debian variant.
+# Note: Only amd64 musl builds are available.
 
 FROM node:22-alpine
 
@@ -22,6 +17,7 @@ COPY --from=ghcr.io/blaxel-ai/sandbox:latest /sandbox-api /usr/local/bin/sandbox
 RUN apk add --no-cache \
     bash \
     curl \
+    fuse3 \
     git \
     jq \
     libseccomp \
@@ -31,7 +27,7 @@ RUN apk add --no-cache \
     procps
 
 # Set agentsh version (use latest stable)
-ARG AGENTSH_VERSION=0.9.8
+ARG AGENTSH_VERSION=0.10.2
 
 # Download and install agentsh (musl/Alpine version)
 # Note: Only amd64 musl builds are available
@@ -75,7 +71,7 @@ RUN mkdir -p /etc/agentsh/policies \
              /var/lib/agentsh/sessions \
              /var/log/agentsh
 
-# Copy agentsh configuration files
+# Copy agentsh configuration files (BEFORE shim installation)
 # Paths relative to build context (project root)
 COPY config.yaml /etc/agentsh/config.yaml
 COPY default.yaml /etc/agentsh/policies/default.yaml
@@ -101,11 +97,20 @@ EXPOSE 8080 18080
 # Set environment variables
 ENV AGENTSH_SERVER=http://127.0.0.1:18080
 ENV PATH="/usr/local/bin:$PATH"
-# Set BASH_ENV for bash builtin blocking
-ENV BASH_ENV=/usr/lib/agentsh/bash_startup.sh
 
-# NOTE: Shell shim NOT installed on Alpine due to BusyBox incompatibility
-# Commands run through sandbox-api will bypass agentsh policy
-# Use 'agentsh exec -- <command>' for explicit policy enforcement
+# Install shell shim LAST - this replaces /bin/sh and /bin/bash
+# After this point, all shell commands go through the shim
+#
+# BusyBox fix: agentsh exec runs /bin/sh.real with argv[0]="sh.real", but
+# BusyBox uses argv[0] for applet detection and doesn't recognize "sh.real".
+# Fix: replace the BusyBox /bin/sh symlink with a link to bash (which ignores
+# argv[0]) BEFORE shim install. The installer then copies bash to /bin/sh.real.
+# NOTE: This must be the final RUN command!
+RUN rm -f /bin/sh && ln -s /bin/bash /bin/sh && \
+    agentsh shim install-shell \
+    --root / \
+    --shim /usr/local/bin/agentsh-shell-shim \
+    --bash \
+    --i-understand-this-modifies-the-host
 
 ENTRYPOINT ["/entrypoint.sh"]

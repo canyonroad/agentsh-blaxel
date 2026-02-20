@@ -89,7 +89,29 @@ main() {
     # Create required directories if they don't exist
     mkdir -p /var/lib/agentsh/sessions /var/lib/agentsh/quarantine /var/log/agentsh
 
-    # IMPORTANT: Start Blaxel sandbox-api FIRST (required for sandbox functionality)
+    # Start the agentsh server FIRST (required before sandbox-api, since
+    # sandbox-api commands go through the shell shim which needs the server)
+    start_agentsh_server
+
+    # Configure environment
+    configure_environment
+
+    # Pre-create a session and enable AGENTSH_SHIM_FORCE for sandbox-api.
+    # In agentsh 0.10.1+, the shell shim bypasses enforcement for non-TTY stdin.
+    # AGENTSH_SHIM_FORCE=1 overrides this bypass. We pre-create the session here
+    # so the shim doesn't need to auto-create one on first command.
+    log_info "Creating agentsh session for shell shim..."
+    AGENTSH_SESSION_JSON=$(agentsh session create --policy default --json 2>/dev/null || true)
+    AGENTSH_SESSION_ID=$(echo "$AGENTSH_SESSION_JSON" | jq -r '.id // empty' 2>/dev/null || true)
+    if [ -n "$AGENTSH_SESSION_ID" ]; then
+        log_info "Session created: $AGENTSH_SESSION_ID"
+        export AGENTSH_SHIM_FORCE=1
+        export AGENTSH_SESSION_ID="$AGENTSH_SESSION_ID"
+    else
+        log_warn "Failed to create session, shim enforcement disabled"
+    fi
+
+    # Start Blaxel sandbox-api
     if command -v sandbox-api &> /dev/null; then
         log_info "Starting Blaxel sandbox API..."
         sandbox-api &
@@ -102,12 +124,6 @@ main() {
     else
         log_warn "sandbox-api not found - sandbox process API will not be available"
     fi
-
-    # Start the agentsh server
-    start_agentsh_server
-
-    # Configure environment
-    configure_environment
 
     log_info "agentsh initialization complete"
     log_info "Server running at http://localhost:$AGENTSH_SERVER_PORT"

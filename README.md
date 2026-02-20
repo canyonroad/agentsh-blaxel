@@ -1,6 +1,6 @@
 # agentsh + Blaxel
 
-Runtime security governance for AI agents using [agentsh](https://github.com/canyonroad/agentsh) v0.9.2 with [Blaxel](https://blaxel.ai) sandboxes.
+Runtime security governance for AI agents using [agentsh](https://github.com/canyonroad/agentsh) v0.10.2 with [Blaxel](https://blaxel.ai) sandboxes.
 
 ## Why agentsh + Blaxel?
 
@@ -36,12 +36,12 @@ Blaxel sandboxes give AI agents a secure, isolated compute environment. But isol
 
 | Blaxel Provides | agentsh Adds |
 |-----------------|--------------|
-| Compute isolation | Network policy enforcement |
-| Process sandboxing | Domain allowlist/blocklist |
-| API access to sandbox | Cloud metadata blocking |
-| Persistent environment | Environment variable filtering |
+| Compute isolation | Command blocking (seccomp) |
+| Process sandboxing | File I/O policy (FUSE) |
+| API access to sandbox | Domain allowlist/blocklist |
+| Persistent environment | Cloud metadata blocking |
+| | Environment variable filtering |
 | | Secret detection and redaction (DLP) |
-| | Dangerous command blocking |
 | | Bash builtin interception |
 | | LLM request auditing |
 | | Complete audit logging |
@@ -50,18 +50,18 @@ Blaxel sandboxes give AI agents a secure, isolated compute environment. But isol
 
 | Feature | Description | Status |
 |---------|-------------|--------|
+| **Command Blocking** | Block dangerous commands (sudo, ssh, kill, rm -rf) via seccomp | Working |
 | **Network Policy** | Block cloud metadata, private networks; allow specific domains | Working |
-| **Policy Evaluation** | Define rules for commands, files, network access | Working |
+| **File I/O Policy** | FUSE-based file access control with soft-delete quarantine | Working |
 | **Environment Filtering** | Block secret env vars (API keys, tokens, credentials) | Working |
 | **Bash Builtin Blocking** | Disable dangerous builtins (kill, enable, ulimit) via BASH_ENV | Working |
 | **DLP** | Redact PII and secrets from outputs | Working |
 | **LLM Proxy** | Intercept and audit LLM API requests | Working |
 | **Audit Logging** | Complete visibility into agent operations | Working |
-| **Command Rules** | Policy correctly identifies blocked commands | Working |
 
 ### Security Capabilities in Blaxel
 
-Running `agentsh detect` inside a Blaxel sandbox shows full security mode with 100% protection score:
+Running `agentsh detect` inside a Blaxel sandbox shows full security mode:
 
 ```
 $ agentsh detect
@@ -74,19 +74,14 @@ CAPABILITIES
   capabilities_drop        ✓
   cgroups_v2               ✓
   ebpf                     ✓
-  fuse                     ✓
+  fuse                     ✓  (file I/O policy enforcement)
   landlock                 -
   landlock_abi             ✓ (v0)
   landlock_network         -
   pid_namespace            -
   seccomp                  ✓
   seccomp_basic            ✓
-  seccomp_user_notify      ✓
-
-TIPS
-----------------------------------------
-  landlock_network: Kernel-level network restrictions disabled
-    -> Requires kernel 6.7+ (Landlock ABI v4). Upgrade kernel or use proxy-based network control.
+  seccomp_user_notify      ✓  (command blocking via execve interception)
 ```
 
 ## Quick Start
@@ -123,22 +118,24 @@ npx tsx test-debian.ts
 
 ### Alpine Variant
 
-An Alpine Linux variant is available for smaller image sizes. However, it has **reduced security** due to BusyBox incompatibility with the shell shim:
+An Alpine Linux variant is available for smaller image sizes with **full security parity**:
 
 | Feature | Debian | Alpine |
 |---------|--------|--------|
-| Shell shim interception | Yes | No |
+| Shell shim interception | Yes | Yes |
+| Command blocking (seccomp) | Yes | Yes |
+| File I/O policy (FUSE) | Yes | Yes |
 | Network policy | Yes | Yes |
 | DLP/secret redaction | Yes | Yes |
 | Audit logging | Yes | Yes |
-| BASH_ENV builtin blocking | Yes | Yes (bash only) |
+| BASH_ENV builtin blocking | Yes | Yes |
 | Image size | ~450MB | ~200MB |
 | Architecture support | amd64, arm64 | amd64 only |
 
-**Why no shell shim on Alpine?** Alpine uses BusyBox, which determines which applet to run based on the binary name (argv[0]). Renaming `/bin/sh` to `/bin/sh.real` breaks this mechanism entirely. Commands run through the sandbox-api will bypass agentsh policy on Alpine.
+**How does the shell shim work on Alpine/BusyBox?** BusyBox uses `argv[0]` for applet detection, but `agentsh exec` runs `/bin/sh.real` with `argv[0]="sh.real"` — which BusyBox doesn't recognize. The fix: replace the BusyBox `/bin/sh` symlink with a link to bash *before* shim install (`rm -f /bin/sh && ln -s /bin/bash /bin/sh`). The installer then copies bash (not BusyBox) to `/bin/sh.real`. Bash ignores `argv[0]`, so it works correctly regardless of how it's invoked.
 
 ```bash
-# Deploy Alpine version (for testing/development only)
+# Deploy Alpine version
 # Blaxel always uses ./blaxel.toml and ./Dockerfile — swap both:
 cp blaxel.toml blaxel.toml.bak && cp blaxel-alpine.toml blaxel.toml
 cp Dockerfile Dockerfile.bak && cp Dockerfile.alpine Dockerfile
@@ -150,13 +147,13 @@ mv Dockerfile.bak Dockerfile
 npx tsx test-alpine.ts
 ```
 
-**Recommendation:** Use the Debian variant for production workloads requiring full security.
+**Recommendation:** Use Debian for production (arm64 support, larger ecosystem). Use Alpine for smaller images (amd64 only).
 
 Expected output from `demo-blocking.ts`:
 ```
 AGENTSH POLICY BLOCKING DEMO
 ============================================================
-agentsh version: agentsh 0.9.2+...
+agentsh version: agentsh 0.10.2+...
 Shell shim active: commands enforced via /bin/sh interception
 
 1. ALLOWED COMMANDS
@@ -189,23 +186,56 @@ Shell shim active: commands enforced via /bin/sh interception
 
 Expected output from `test-debian.ts`:
 ```
-agentsh + Blaxel: Security Feature Tests
+AGENTSH-BLAXEL DEBIAN TEST
 ============================================================
-TEST SUITE 1: Network Policy
-  npm registry (allowed) - PASS
-  GitHub API (allowed) - PASS
-  AWS metadata (blocked) - PASS
-  Private network (blocked) - PASS
 
-TEST SUITE 2: Policy Evaluation
-  Policy: sudo should be denied - PASS
-  Policy: ssh should be denied - PASS
-  Policy: echo should be allowed - PASS
-  ...
+=== Test Suite: agentsh Installation ===
+  agentsh installed... ✓ PASS
+  CGO/libseccomp support... ✓ PASS
 
-Total tests: 14
-Passed: 14
-Success rate: 100.0%
+=== Test Suite: Server Health ===
+  agentsh server healthy... ✓ PASS
+
+=== Test Suite: Configuration ===
+  policy file exists... ✓ PASS
+  config file exists... ✓ PASS
+
+=== Test Suite: Shell Shim ===
+  echo through shim... ✓ PASS
+  file listing through shim... ✓ PASS
+  bash execution through shim... ✓ PASS
+
+=== Test Suite: Policy Enforcement ===
+  sudo blocked (exit 126)... ✓ PASS
+  ssh blocked (exit 126)... ✓ PASS
+  kill blocked (exit 126)... ✓ PASS
+  rm -rf blocked (exit 126)... ✓ PASS
+  echo allowed (exit 0)... ✓ PASS
+
+=== Test Suite: Network Policy ===
+  allowed domain (github.com)... ✓ PASS
+  metadata endpoint blocked... ✓ PASS
+
+=== Test Suite: Environment Policy ===
+  env filtered to safe vars only... ✓ PASS
+  BASH_ENV passed through... ✓ PASS
+  policy-test: sudo denied... ✓ PASS
+  policy-test: echo allowed... ✓ PASS
+
+=== Test Suite: File I/O Policy ===
+  policy-test: workspace write allowed... ✓ PASS
+  policy-test: workspace read allowed... ✓ PASS
+  policy-test: tmp write allowed... ✓ PASS
+  policy-test: workspace delete is soft-delete... ✓ PASS
+  policy-test: SSH key access denied... ✓ PASS
+  policy-test: AWS credentials denied... ✓ PASS
+  policy-test: system path write denied... ✓ PASS
+  policy-test: /etc write denied... ✓ PASS
+  write to /app succeeds... ✓ PASS
+  write to /tmp succeeds... ✓ PASS
+  read system files succeeds... ✓ PASS
+
+Total: 30 passed / 0 failed
 ```
 
 ## Project Structure
@@ -215,28 +245,51 @@ agentsh-blaxel/
 ├── blaxel.toml          # Blaxel configuration (default: Debian)
 ├── blaxel-alpine.toml   # Blaxel configuration (Alpine)
 ├── Dockerfile           # Debian container with agentsh + shell shim
-├── Dockerfile.alpine    # Alpine container (no shell shim)
+├── Dockerfile.alpine    # Alpine container with agentsh + shell shim (BusyBox fix)
 ├── debian/              # Debian-specific files
-│   └── entrypoint.sh    # Startup script for Debian
+│   └── entrypoint.sh    # Startup script (session pre-creation + AGENTSH_SHIM_FORCE)
 ├── alpine/              # Alpine-specific files
-│   └── entrypoint.sh    # Startup script for Alpine
+│   └── entrypoint.sh    # Startup script (same pattern as Debian, uses bash.real)
 ├── config.yaml          # agentsh server configuration (shared)
 │                        # - Network interception settings
 │                        # - DLP patterns
 │                        # - LLM proxy settings
 │                        # - env_inject (BASH_ENV for builtin blocking)
+│                        # - FUSE file I/O settings
 ├── default.yaml         # Security policy rules (shared)
-│                        # - file_rules
+│                        # - file_rules (FUSE file I/O)
 │                        # - network_rules
 │                        # - command_rules
 │                        # - env_policy
+├── sandbox-utils.ts     # Shared sandbox API utilities
 ├── demo-blocking.ts     # Policy blocking demo (shell shim)
-├── test-debian.ts       # Security test suite (Debian)
-├── test-alpine.ts       # Security test suite (Alpine)
+├── test-debian.ts       # Security test suite (Debian, 30 tests)
+├── test-alpine.ts       # Security test suite (Alpine, 32 tests)
 └── package.json         # Node.js dependencies
 ```
 
 ## Security Policy Details
+
+### File I/O Rules (`file_rules`)
+
+FUSE-based file access control intercepts file operations at the filesystem level. Requires the `fuse3` package.
+
+**Workspace (`/app`):**
+- Read/write/create allowed
+- Deletes use **soft-delete** — files are quarantined to `/var/lib/agentsh/quarantine/` and can be recovered
+
+**Temp directories (`/tmp`, `/var/tmp`):**
+- Full access
+
+**System paths (`/usr`, `/lib`, `/bin`, `/etc`):**
+- Read-only
+
+**Blocked paths:**
+- `/root/.ssh/**` — SSH keys
+- `/root/.aws/**` — AWS credentials
+- `/root/.env*` — Environment files
+
+**Important:** The policy must include an `allow-stat-everywhere` rule permitting `stat`, `list`, and `readlink` on all paths (`**`), placed before the default-deny. Without this, FUSE stat calls cause all commands to fail with exit 127.
 
 ### Network Rules (`network_rules`)
 
@@ -325,7 +378,7 @@ agentsh provides additional security for Blaxel sandboxes beyond standard isolat
 | **Process history disclosure** | Agents can list all processes via `localhost:8080/process` | **Not mitigated** (see below) |
 | **Internal DNS probing** | Agents could enumerate Blaxel's internal DNS (172.16.x.x) | Private network ranges blocked |
 | **Sandbox-api manipulation** | Direct API calls could bypass intended workflows | **Partially mitigated** — commands routed through agentsh policy, but sandbox-api is still reachable |
-| **Signal attacks** | Bash `kill` builtin could signal sandbox-api/agentsh | Builtins disabled via BASH_ENV |
+| **Signal attacks** | Bash `kill` builtin could signal sandbox-api/agentsh | Builtins disabled via BASH_ENV; `/bin/kill` blocked by command policy |
 | **Cloud credential theft** | Agents could access 169.254.169.254 metadata | Metadata endpoint blocked |
 
 ### Blocking Internal API Access
@@ -344,13 +397,13 @@ sandbox-api runs: /bin/sh -c "sudo whoami"
                      ▼
             ┌─────────────────┐
             │  Shell Shim     │  /bin/sh → agentsh-shell-shim
-            │  (intercepts)   │
-            └────────┬────────┘
+            │  (intercepts)   │  AGENTSH_SHIM_FORCE=1 overrides
+            └────────┬────────┘  non-TTY bypass (v0.10.1+)
                      │
                      ▼
             ┌─────────────────┐
-            │  agentsh exec   │  Auto-creates session, enforces policy
-            │  (seccomp +     │  via seccomp execve interception
+            │  agentsh exec   │  Uses pre-created session
+            │  (seccomp +     │  (AGENTSH_SESSION_ID from entrypoint)
             │   unixwrap)     │
             └────────┬────────┘
                      │
@@ -361,6 +414,17 @@ sandbox-api runs: /bin/sh -c "sudo whoami"
         │ exit: 0  │  │ exit: 126│
         └──────────┘  └──────────┘
 ```
+
+### Entrypoint Startup Sequence (Debian)
+
+The entrypoint must start services in a specific order:
+
+1. **Start agentsh server** — the shell shim needs the server running
+2. **Pre-create a session** — `agentsh session create --policy default --json`
+3. **Export `AGENTSH_SHIM_FORCE=1` and `AGENTSH_SESSION_ID`** — so sandbox-api inherits them
+4. **Start sandbox-api** — commands now go through the shim with policy enforcement
+
+**Why this order matters:** In agentsh 0.10.1+, the shell shim bypasses enforcement when stdin is not a TTY (to avoid corrupting binary data in pipes). Since Blaxel's sandbox-api runs commands without a TTY, `AGENTSH_SHIM_FORCE=1` overrides this bypass. The session must be pre-created before sandbox-api starts — otherwise the shim's session auto-creation can block on first command.
 
 Full system view:
 
@@ -469,6 +533,8 @@ agentsh debug policy-test --op exec --path sudo --json
 | `BL_SANDBOX_URL` | Sandbox URL for tests | Auto-detected |
 | `BL_ACCESS_TOKEN` | Blaxel access token | From `~/.blaxel/config.yaml` |
 | `AGENTSH_SERVER` | agentsh server URL | `http://127.0.0.1:18080` |
+| `AGENTSH_SHIM_FORCE` | Force shell shim enforcement even without TTY (set by entrypoint) | Not set |
+| `AGENTSH_SESSION_ID` | Pre-created session ID for the shell shim (set by entrypoint) | Not set |
 
 ## Related Projects
 

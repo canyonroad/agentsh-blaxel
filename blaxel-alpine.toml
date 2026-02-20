@@ -1,8 +1,9 @@
 # Blaxel Sandbox Configuration for agentsh (Alpine)
-# Smaller image but limited security (no shell shim)
+# Alpine-based variant with full security parity with Debian.
+# Uses musl libc with statically-linked libseccomp.
 #
-# NOTE: Alpine variant does NOT intercept shell commands due to BusyBox
-# incompatibility. Use Debian variant for full security.
+# NOTE: Blaxel always uses ./Dockerfile — to deploy Alpine,
+# swap Dockerfile.alpine into place (see test-alpine.ts).
 
 type = "sandbox"
 name = "agentsh-blaxel-alpine"
@@ -12,9 +13,6 @@ name = "agentsh-blaxel-alpine"
 generation = "mk3"
 # 4GB memory for comfortable operation
 memory = 4096
-# NOTE: Blaxel always uses ./Dockerfile — to deploy Alpine,
-# swap Dockerfile.alpine into place (see test-alpine.ts)
-
 # agentsh server port
 [[runtime.ports]]
 name = "agentsh"
