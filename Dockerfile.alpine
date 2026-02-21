@@ -27,7 +27,7 @@ RUN apk add --no-cache \
     procps
 
 # Set agentsh version (use latest stable)
-ARG AGENTSH_VERSION=0.10.2
+ARG AGENTSH_VERSION=0.10.4
 
 # Download and install agentsh (musl/Alpine version)
 # Note: Only amd64 musl builds are available

@@ -40,7 +40,8 @@ bl delete sandbox agentsh-blaxel  # Clean up
 
 ## Version History
 
-- **0.10.2** (current) - Adds `AGENTSH_SHIM_FORCE=1` env var to override the non-TTY stdin bypass in the shell shim. Required for sandbox platforms (Blaxel, E2B) where commands run without a TTY but still need policy enforcement.
+- **0.10.4** (current) - Latest stable release.
+- **0.10.2** (previous) - Adds `AGENTSH_SHIM_FORCE=1` env var to override the non-TTY stdin bypass in the shell shim. Required for sandbox platforms (Blaxel, E2B) where commands run without a TTY but still need policy enforcement.
 - **0.10.1** - Shell shim bypasses enforcement when stdin is not a TTY (PR #96). Breaks Blaxel integration since sandbox-api runs commands without TTY. Use 0.10.2+ with `AGENTSH_SHIM_FORCE=1`.
 - **0.9.8** (previous) - FUSE file I/O enforcement working (requires `fuse3` package). Shell shim works, `agentsh exec` CLI hangs when nested through shim. Demo uses direct commands + events query API for policy rule names.
 - **0.9.2** (previous) - Shell shim works, `agentsh exec` CLI hangs when nested through shim. FUSE not working (missing `fuse3` package).
