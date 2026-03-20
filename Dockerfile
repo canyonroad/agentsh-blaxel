@@ -22,7 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Set agentsh version (use latest stable)
-ARG AGENTSH_VERSION=0.10.4
+ARG AGENTSH_VERSION=0.16.5
 
 # Download and install agentsh
 # Use .deb package for Debian-based systems, fall back to tar.gz
@@ -44,6 +44,7 @@ RUN set -eux; \
         install -m 0755 /tmp/agentsh /usr/local/bin/agentsh; \
         install -m 0755 /tmp/agentsh-shell-shim /usr/local/bin/agentsh-shell-shim 2>/dev/null || true; \
         install -m 0755 /tmp/agentsh-unixwrap /usr/local/bin/agentsh-unixwrap 2>/dev/null || true; \
+        install -m 0755 /tmp/agentsh-stub /usr/local/bin/agentsh-stub 2>/dev/null || true; \
         install -m 0755 /tmp/libenvshim.so /usr/local/lib/libenvshim.so 2>/dev/null || true; \
         # Install bash_startup.sh for BASH_ENV (required for builtin blocking)
         mkdir -p /usr/lib/agentsh; \
@@ -53,12 +54,13 @@ RUN set -eux; \
             printf '%s\n' \
                 '#!/bin/bash' \
                 '# Disable builtins that bypass seccomp policy enforcement' \
+                '# NOTE: enable -n enable MUST be last (it disables itself)' \
                 'enable -n kill      # Signal sending' \
-                'enable -n enable    # Prevent re-enabling' \
                 'enable -n ulimit    # Resource limits' \
                 'enable -n umask     # File permission mask' \
                 'enable -n builtin   # Force builtin bypass' \
                 'enable -n command   # Function/alias bypass' \
+                'enable -n enable    # Prevent re-enabling' \
                 > /usr/lib/agentsh/bash_startup.sh; \
             chmod 755 /usr/lib/agentsh/bash_startup.sh; \
         fi; \

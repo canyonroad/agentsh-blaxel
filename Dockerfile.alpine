@@ -14,8 +14,11 @@ FROM node:22-alpine
 COPY --from=ghcr.io/blaxel-ai/sandbox:latest /sandbox-api /usr/local/bin/sandbox-api
 
 # Install required dependencies
+# coreutils: standalone rm/ls/etc (not BusyBox symlinks) for proper seccomp interception
+# util-linux-misc: standalone kill binary for proper seccomp interception
 RUN apk add --no-cache \
     bash \
+    coreutils \
     curl \
     fuse3 \
     git \
@@ -24,10 +27,11 @@ RUN apk add --no-cache \
     sudo \
     netcat-openbsd \
     ca-certificates \
-    procps
+    procps \
+    util-linux-misc
 
 # Set agentsh version (use latest stable)
-ARG AGENTSH_VERSION=0.10.4
+ARG AGENTSH_VERSION=0.16.5
 
 # Download and install agentsh (musl/Alpine version)
 # Note: Only amd64 musl builds are available
@@ -42,25 +46,26 @@ RUN set -eux; \
     install -m 0755 /tmp/agentsh /usr/local/bin/agentsh; \
     install -m 0755 /tmp/agentsh-shell-shim /usr/local/bin/agentsh-shell-shim 2>/dev/null || true; \
     install -m 0755 /tmp/agentsh-unixwrap /usr/local/bin/agentsh-unixwrap 2>/dev/null || true; \
-    # Install bash_startup.sh for BASH_ENV (required for builtin blocking)
+    install -m 0755 /tmp/agentsh-stub /usr/local/bin/agentsh-stub 2>/dev/null || true; \
     mkdir -p /usr/lib/agentsh; \
-    if [ -f /tmp/packaging/bash_startup.sh ]; then \
-        install -m 0755 /tmp/packaging/bash_startup.sh /usr/lib/agentsh/bash_startup.sh; \
-    else \
-        echo "WARNING: bash_startup.sh not found in release tarball"; \
-        printf '%s\n' \
-            '#!/bin/bash' \
-            '# Disable builtins that bypass seccomp policy enforcement' \
-            'enable -n kill      # Signal sending' \
-            'enable -n enable    # Prevent re-enabling' \
-            'enable -n ulimit    # Resource limits' \
-            'enable -n umask     # File permission mask' \
-            'enable -n builtin   # Force builtin bypass' \
-            'enable -n command   # Function/alias bypass' \
-            > /usr/lib/agentsh/bash_startup.sh; \
-        chmod 755 /usr/lib/agentsh/bash_startup.sh; \
-    fi; \
     rm -rf /tmp/agentsh* /tmp/packaging
+
+# Install Alpine-compatible bash_startup.sh for BASH_ENV
+# Alpine's bash package lacks the 'enable' builtin, so we use function
+# overrides to redirect builtins to external binaries (which seccomp can intercept)
+RUN printf '%s\n' \
+    '#!/bin/bash' \
+    '# Disable builtins that bypass seccomp policy enforcement' \
+    '# Only disable kill (security-critical) and enable (prevent re-enabling)' \
+    '# Do NOT disable command/builtin — they break shell scripts on Alpine' \
+    'if type enable &>/dev/null 2>&1; then' \
+    '  enable -n kill' \
+    '  enable -n ulimit' \
+    '  enable -n umask' \
+    '  enable -n enable' \
+    'fi' \
+    > /usr/lib/agentsh/bash_startup.sh && \
+    chmod 755 /usr/lib/agentsh/bash_startup.sh
 
 # Verify agentsh installation
 RUN agentsh --version

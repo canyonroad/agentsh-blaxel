@@ -40,12 +40,10 @@ bl delete sandbox agentsh-blaxel  # Clean up
 
 ## Version History
 
-- **0.10.4** (current) - Latest stable release.
-- **0.10.2** (previous) - Adds `AGENTSH_SHIM_FORCE=1` env var to override the non-TTY stdin bypass in the shell shim. Required for sandbox platforms (Blaxel, E2B) where commands run without a TTY but still need policy enforcement.
-- **0.10.1** - Shell shim bypasses enforcement when stdin is not a TTY (PR #96). Breaks Blaxel integration since sandbox-api runs commands without TTY. Use 0.10.2+ with `AGENTSH_SHIM_FORCE=1`.
-- **0.9.8** (previous) - FUSE file I/O enforcement working (requires `fuse3` package). Shell shim works, `agentsh exec` CLI hangs when nested through shim. Demo uses direct commands + events query API for policy rule names.
-- **0.9.2** (previous) - Shell shim works, `agentsh exec` CLI hangs when nested through shim. FUSE not working (missing `fuse3` package).
-- **0.8.10** (legacy) - Nested `agentsh exec` through shim worked (or appeared to).
+- **0.16.5** (current) - Introduces `agentsh-stub` binary for exec redirect. Both Dockerfiles must install it (`install -m 0755 /tmp/agentsh-stub /usr/local/bin/agentsh-stub`); without it the server hangs during exec redirect and becomes unresponsive. Multicall binary bypass on Alpine persists from 0.16.4.
+- **0.16.4** (previous) - Ed25519 policy signing, ptrace enforcement backend, seccomp file monitor, path canonicalization for execve. Known issue: BusyBox/coreutils multicall binary unwrapping extracts wrong `payload_command` (last arg instead of argv[0]), causing kill/rm bypass on Alpine. Policy evaluation is correct; runtime enforcement fails for multicall binaries.
+- **0.10.4** - Performance improvements.
+- **0.10.2** - Adds `AGENTSH_SHIM_FORCE=1` env var to override the non-TTY stdin bypass in the shell shim. Required for sandbox platforms (Blaxel, E2B) where commands run without a TTY but still need policy enforcement.
 
 ## FUSE File I/O Enforcement
 
@@ -88,11 +86,13 @@ When querying APIs from inside the sandbox, use `/usr/bin/agentsh` (full path) t
 
 ## Alpine Notes
 
-Alpine now has **full security parity** with Debian. The shell shim works correctly on Alpine/BusyBox.
+Alpine has **near-full security parity** with Debian. The shell shim works correctly on Alpine/BusyBox.
 
-**How the shim works on BusyBox (corrected 2026-02-19):** BusyBox uses `argv[0]` for applet detection, but `agentsh exec` runs `/bin/sh.real` with `argv[0]="sh.real"` — which BusyBox doesn't recognize ("applet not found"). The fix in `Dockerfile.alpine`: replace the BusyBox `/bin/sh` symlink with a link to bash *before* shim install (`rm -f /bin/sh && ln -s /bin/bash /bin/sh`). The installer then copies bash (not BusyBox) to `/bin/sh.real`. Bash ignores `argv[0]`, so it works correctly regardless of how it's invoked. The agentsh CI already tests the shim on Alpine (see `Dockerfile.test.alpine` in the agentsh repo).
+**Known issue (agentsh 0.16.4): Multicall binary bypass.** BusyBox and coreutils on Alpine are multicall binaries — `/bin/kill` → `/bin/busybox`, `/bin/rm` → `/bin/coreutils`. The v0.14.0+ path canonicalization resolves symlinks to the underlying multicall binary, then extracts `payload_command` from the *last argument* instead of argv[0]. This means `kill -9 1` gets `payload_command="1"` and `rm -rf /tmp/dir` gets `payload_command="dir"`, neither matching the block rules. The policy evaluator correctly denies these commands (verified by `agentsh debug policy-test`), but runtime seccomp enforcement doesn't block them. Alpine tests handle this with fallback policy-evaluation checks.
 
-The previous claim that "BusyBox's symlink-based applet detection is incompatible with the shim" was incorrect — the incompatibility is specifically with `agentsh exec`'s argv[0] handling, and is solved by using bash instead of BusyBox as the underlying shell.
+**bash_startup.sh on Alpine:** Alpine's bash has the `enable` builtin, but `enable -n enable` must be the LAST call because it disables itself. The Dockerfile.alpine writes a custom bash_startup.sh (overriding the release tarball's version) that also avoids disabling `command` and `builtin` which break shell scripts in the container.
+
+**How the shim works on BusyBox (corrected 2026-02-19):** BusyBox uses `argv[0]` for applet detection, but `agentsh exec` runs `/bin/sh.real` with `argv[0]="sh.real"` — which BusyBox doesn't recognize ("applet not found"). The fix in `Dockerfile.alpine`: replace the BusyBox `/bin/sh` symlink with a link to bash *before* shim install (`rm -f /bin/sh && ln -s /bin/bash /bin/sh`). The installer then copies bash (not BusyBox) to `/bin/sh.real`. Bash ignores `argv[0]`, so it works correctly regardless of how it's invoked.
 
 **Alpine-specific differences:**
 - Binary path: `/usr/local/bin/agentsh` (tar.gz install), not `/usr/bin/agentsh` (.deb install)
@@ -101,3 +101,5 @@ The previous claim that "BusyBox's symlink-based applet detection is incompatibl
 - Architecture: amd64 only (no arm64 musl build)
 - `agentsh --version` shows "agentsh dev" (musl build doesn't embed version)
 - Requires `fuse3` apk package for FUSE file I/O enforcement
+- Requires `coreutils` apk for standalone binaries (reduces BusyBox multicall issues)
+- Requires `util-linux-misc` apk (general utilities)
