@@ -1,5 +1,5 @@
 # agentsh Server Configuration for Blaxel Sandbox
-# Optimized for containerized AI agent environments (v0.16.5)
+# Optimized for containerized AI agent environments (v0.16.6)
 
 # Security settings from agentsh detect
 security:

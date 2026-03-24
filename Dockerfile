@@ -22,7 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Set agentsh version (use latest stable)
-ARG AGENTSH_VERSION=0.16.5
+ARG AGENTSH_VERSION=0.16.6
 
 # Download and install agentsh
 # Use .deb package for Debian-based systems, fall back to tar.gz

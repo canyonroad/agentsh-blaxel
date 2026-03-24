@@ -1,6 +1,6 @@
 # agentsh + Blaxel
 
-Runtime security governance for AI agents using [agentsh](https://github.com/canyonroad/agentsh) v0.10.2 with [Blaxel](https://blaxel.ai) sandboxes.
+Runtime security governance for AI agents using [agentsh](https://github.com/canyonroad/agentsh) v0.16.6 with [Blaxel](https://blaxel.ai) sandboxes.
 
 ## Why agentsh + Blaxel?
 
