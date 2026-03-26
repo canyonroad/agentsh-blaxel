@@ -61,10 +61,10 @@ async function main() {
       return result.exitCode === 0 && output.includes('agentsh')
     })
 
-    await test('CGO/libseccomp support', async () => {
-      const result = await runCommand(sandboxUrl, token, 'ldd /usr/bin/agentsh 2>&1 | grep -E "seccomp|not.*dynamic"')
+    await test('libseccomp2 installed', async () => {
+      const result = await runCommand(sandboxUrl, token, 'ldconfig -p 2>&1 | grep seccomp')
       const output = getOutput(result)
-      console.log(`\n    Binary linking: ${output}`)
+      console.log(`\n    Library: ${output}`)
       return output.includes('libseccomp')
     })
 

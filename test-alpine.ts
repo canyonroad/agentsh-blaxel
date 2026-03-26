@@ -160,8 +160,8 @@ async function main() {
     })
 
     // Note: kill and rm on Alpine are BusyBox/coreutils multicall binaries.
-    // agentsh 0.16.4 has a bug where the payload_command is extracted from the
-    // last argument instead of argv[0], so the policy rule doesn't match.
+    // agentsh has a known issue where the payload_command is extracted from the
+    // last argument instead of argv[0], so the policy rule doesn't match at runtime.
     // Policy evaluation is correct (tested below in policy-test suite).
     // Use a nonexistent PID to avoid crashing the container if kill gets through.
     await test('kill blocked (exit 126 or policy-deny)', async () => {
@@ -181,7 +181,7 @@ async function main() {
       await runCommand(sandboxUrl, token, 'mkdir -p /tmp/testdir && touch /tmp/testdir/f.txt')
       const result = await runCommand(sandboxUrl, token, '/bin/rm -rf /tmp/testdir')
       if (result.exitCode === 126) return true
-      // Known issue: coreutils multicall binary not unwrapped by agentsh 0.16.4
+      // Known issue: coreutils multicall binary not unwrapped correctly.
       // Policy correctly blocks rm (block-rm-recursive), but runtime seccomp
       // sees /bin/coreutils instead of /bin/rm, bypassing the command rule.
       console.log(`\n    [known issue: coreutils multicall bypass on Alpine]`)

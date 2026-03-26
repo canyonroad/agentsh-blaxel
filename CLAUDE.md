@@ -40,8 +40,10 @@ bl delete sandbox agentsh-blaxel  # Clean up
 
 ## Version History
 
-- **0.16.5** (current) - Introduces `agentsh-stub` binary for exec redirect. Both Dockerfiles must install it (`install -m 0755 /tmp/agentsh-stub /usr/local/bin/agentsh-stub`); without it the server hangs during exec redirect and becomes unresponsive. Multicall binary bypass on Alpine persists from 0.16.4.
-- **0.16.4** (previous) - Ed25519 policy signing, ptrace enforcement backend, seccomp file monitor, path canonicalization for execve. Known issue: BusyBox/coreutils multicall binary unwrapping extracts wrong `payload_command` (last arg instead of argv[0]), causing kill/rm bypass on Alpine. Policy evaluation is correct; runtime enforcement fails for multicall binaries.
+- **0.16.8** (current) - Stability and cross-platform fixes. Adds `/etc/agentsh/shim.conf` for enforcing policies in non-interactive environments (alternative to `AGENTSH_SHIM_FORCE`). Fixed argv0 handling for BusyBox/Alpine, removed all `syscall.Exec` from shim (uses piping), fixed daemon fd leak in sandbox toolboxes, fixed ptrace/seccomp deadlocks in hybrid mode. Stricter file I/O enforcement blocks `ldd` from reading binary files (test updated to use `ldconfig`). Multicall binary bypass on Alpine persists.
+- **0.16.7** - Hybrid ptrace-execve + seccomp wrapper mode for restricted environments. Async SQLite batching. Fixed notify handler goroutine leak (sessions unstable after ~10-15 exec calls). Fixed ptrace prefilter TSYNC for consistent thread filtering.
+- **0.16.6** - Previous stable. Both Dockerfiles install `agentsh-stub` binary for exec redirect.
+- **0.16.4** - Ed25519 policy signing, ptrace enforcement backend, seccomp file monitor, path canonicalization for execve. Known issue: BusyBox/coreutils multicall binary unwrapping extracts wrong `payload_command` (last arg instead of argv[0]), causing kill/rm bypass on Alpine. Policy evaluation is correct; runtime enforcement fails for multicall binaries.
 - **0.10.4** - Performance improvements.
 - **0.10.2** - Adds `AGENTSH_SHIM_FORCE=1` env var to override the non-TTY stdin bypass in the shell shim. Required for sandbox platforms (Blaxel, E2B) where commands run without a TTY but still need policy enforcement.
 
@@ -88,7 +90,7 @@ When querying APIs from inside the sandbox, use `/usr/bin/agentsh` (full path) t
 
 Alpine has **near-full security parity** with Debian. The shell shim works correctly on Alpine/BusyBox.
 
-**Known issue (agentsh 0.16.4): Multicall binary bypass.** BusyBox and coreutils on Alpine are multicall binaries — `/bin/kill` → `/bin/busybox`, `/bin/rm` → `/bin/coreutils`. The v0.14.0+ path canonicalization resolves symlinks to the underlying multicall binary, then extracts `payload_command` from the *last argument* instead of argv[0]. This means `kill -9 1` gets `payload_command="1"` and `rm -rf /tmp/dir` gets `payload_command="dir"`, neither matching the block rules. The policy evaluator correctly denies these commands (verified by `agentsh debug policy-test`), but runtime seccomp enforcement doesn't block them. Alpine tests handle this with fallback policy-evaluation checks.
+**Known issue (persists through 0.16.8): Multicall binary bypass.** BusyBox and coreutils on Alpine are multicall binaries — `/bin/kill` → `/bin/busybox`, `/bin/rm` → `/bin/coreutils`. The path canonicalization resolves symlinks to the underlying multicall binary, then extracts `payload_command` from the *last argument* instead of argv[0]. This means `kill -9 1` gets `payload_command="1"` and `rm -rf /tmp/dir` gets `payload_command="dir"`, neither matching the block rules. The policy evaluator correctly denies these commands (verified by `agentsh debug policy-test`), but runtime seccomp enforcement doesn't block them. Alpine tests handle this with fallback policy-evaluation checks.
 
 **bash_startup.sh on Alpine:** Alpine's bash has the `enable` builtin, but `enable -n enable` must be the LAST call because it disables itself. The Dockerfile.alpine writes a custom bash_startup.sh (overriding the release tarball's version) that also avoids disabling `command` and `builtin` which break shell scripts in the container.
 
