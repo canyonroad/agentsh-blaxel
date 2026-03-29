@@ -1,6 +1,6 @@
 # agentsh + Blaxel
 
-Runtime security governance for AI agents using [agentsh](https://github.com/canyonroad/agentsh) v0.16.8 with [Blaxel](https://blaxel.ai) sandboxes.
+Runtime security governance for AI agents using [agentsh](https://github.com/canyonroad/agentsh) v0.16.9 with [Blaxel](https://blaxel.ai) sandboxes.
 
 ## Why agentsh + Blaxel?
 
@@ -45,6 +45,7 @@ agentsh adds the governance layer that controls what agents can do inside the sa
 | | Bash builtin interception |
 | | LLM request auditing |
 | | Complete audit logging |
+| | Security hardening (credential removal, persistence vector cleanup) |
 
 ## Quick Start
 
@@ -66,6 +67,9 @@ npx tsx demo-blocking.ts
 
 # Run the full test suite (30 tests)
 npx tsx test-debian.ts
+
+# Run the Agent Sandbox Taxonomy (AST) benchmark
+npx tsx test-taxonomy.ts
 ```
 
 **Alpine variant:** An Alpine Linux variant is available with full security parity and smaller image sizes (~200MB vs ~450MB, amd64 only). Run `npx tsx test-alpine.ts` to auto-deploy and test it.
@@ -126,6 +130,7 @@ agentsh-blaxel/
 ├── demo-blocking.ts
 ├── test-debian.ts
 ├── test-alpine.ts
+├── test-taxonomy.ts
 └── package.json
 ```
 
@@ -134,6 +139,7 @@ agentsh-blaxel/
 ```bash
 npx tsx test-debian.ts    # Debian test suite (30 tests)
 npx tsx test-alpine.ts    # Alpine test suite (32 tests, auto-deploys)
+npx tsx test-taxonomy.ts  # AST benchmark (18/28, 64%)
 ```
 
 ## Related Projects

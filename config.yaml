@@ -1,10 +1,10 @@
 # agentsh Server Configuration for Blaxel Sandbox
-# Optimized for containerized AI agent environments (v0.16.8)
+# Optimized for containerized AI agent environments (v0.16.9)
 
 # Security settings from agentsh detect
 security:
-  mode: "full"      # Uses seccomp + eBPF + FUSE
-  strict: true      # Enforce all security features
+  mode: "full"      # seccomp + eBPF + FUSE (v0.16.8 fix: EPERM instead of KILL)
+  strict: true
 
 capabilities:
   allow: []
@@ -43,6 +43,8 @@ sandbox:
   # Primary use: BASH_ENV to disable bash builtins that bypass seccomp
   env_inject:
     BASH_ENV: "/usr/lib/agentsh/bash_startup.sh"
+    OTEL_SERVICE_NAME: "agentsh-blaxel"
+    OTEL_TRACES_EXPORTER: "otlp"
 
   # FUSE filesystem interception (requires FUSE support)
   # Deferred: mount on first exec, not at startup. Survives container
@@ -84,6 +86,7 @@ sandbox:
     file_monitor:
       enabled: true
       enforce_without_fuse: true
+      intercept_metadata: false
 
   # Resource limits enforced at sandbox level
   limits:

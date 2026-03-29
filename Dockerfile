@@ -15,14 +15,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     jq \
     libseccomp2 \
-    sudo \
     netcat-openbsd \
     ca-certificates \
     procps \
     && rm -rf /var/lib/apt/lists/*
 
 # Set agentsh version (use latest stable)
-ARG AGENTSH_VERSION=0.16.8
+ARG AGENTSH_VERSION=0.16.9
+# Cache bust to force re-download of updated release
+ARG AGENTSH_CACHE_BUST=9
 
 # Download and install agentsh
 # Use .deb package for Debian-based systems, fall back to tar.gz
@@ -103,6 +104,40 @@ EXPOSE 8080 18080
 ENV AGENTSH_SERVER=http://127.0.0.1:18080
 ENV PATH="/usr/local/bin:$PATH"
 
+# Download ast-probe for Agent Sandbox Taxonomy benchmarking
+# https://github.com/kajogo777/the-agent-sandbox-taxonomy
+RUN ARCH=$(uname -m); \
+    case "$ARCH" in \
+        x86_64) PROBE_ARCH="amd64" ;; \
+        aarch64) PROBE_ARCH="arm64" ;; \
+        *) PROBE_ARCH="amd64" ;; \
+    esac; \
+    curl -fsSL -o /usr/local/bin/ast-probe \
+        "https://github.com/kajogo777/the-agent-sandbox-taxonomy/releases/download/probe/v0.1.0/ast-probe-linux-${PROBE_ARCH}" && \
+    chmod +x /usr/local/bin/ast-probe
+
+# Security hardening: lock sensitive files, remove persistence vectors
+# NOTE: chmod 000 doesn't stop root from reading files on Linux.
+# Root bypasses permission checks for read/write. Must actually empty/delete.
+RUN \
+    # Empty /etc/shadow and /etc/gshadow (root can still read chmod-000 files)
+    : > /etc/shadow && : > /etc/gshadow && \
+    # Remove sudo artifacts
+    rm -f /etc/sudoers && rm -rf /etc/sudoers.d && \
+    # Remove persistence vectors: cron, systemd
+    rm -rf /var/spool/cron /etc/cron.d /etc/cron.daily /etc/cron.hourly \
+           /etc/cron.monthly /etc/cron.weekly /etc/crontab && \
+    rm -rf /etc/systemd && \
+    # Remove Docker socket
+    rm -f /var/run/docker.sock && \
+    # Remove credential directories
+    rm -rf /root/.ssh /root/.aws /root/.kube /root/.gcloud /root/.config/gcloud \
+           /root/.docker /root/.azure /root/.gnupg /root/.netrc /root/.npmrc \
+           /root/.pypirc /root/.gitconfig && \
+    # Remove shell persistence vectors (init files)
+    rm -f /root/.bashrc /root/.profile /root/.bash_profile /root/.zshrc \
+          /root/.bash_history /root/.zsh_history
+
 # Install shell shim LAST - this replaces /bin/sh and /bin/bash
 # After this point, all shell commands go through the shim
 # NOTE: This must be the final RUN command!
@@ -110,6 +145,7 @@ RUN agentsh shim install-shell \
     --root / \
     --shim /usr/bin/agentsh-shell-shim \
     --bash \
-    --i-understand-this-modifies-the-host
+    --i-understand-this-modifies-the-host && \
+    chmod +x /bin/sh.real /bin/bash.real 2>/dev/null || true
 
 ENTRYPOINT ["/entrypoint.sh"]
