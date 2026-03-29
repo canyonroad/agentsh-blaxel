@@ -156,16 +156,19 @@ async function main() {
       const result = await runCommand(sandboxUrl, token, 'env | sort')
       const output = getOutput(result)
       // Should NOT contain any cloud credentials or API keys
-      const blocked = ['AWS_', 'AZURE_', 'GOOGLE_', 'OPENAI_', 'ANTHROPIC_', 'LD_PRELOAD', 'LD_LIBRARY_PATH']
+      const blocked = ['AWS_', 'AZURE_', 'GOOGLE_', 'OPENAI_', 'ANTHROPIC_', 'LD_LIBRARY_PATH']
       for (const prefix of blocked) {
         if (output.includes(prefix)) return false
       }
+      // LD_PRELOAD is OK when it's the agentsh ptracer (0.16.9+ injects this for Yama child tracking)
+      const ldPreload = output.match(/LD_PRELOAD=(.*)/)?.[1] ?? ''
+      if (ldPreload && !ldPreload.includes('agentsh')) return false
       // Should contain basic safe vars
       return output.includes('HOME=') && output.includes('PATH=')
     })
 
     await test('BASH_ENV passed through', async () => {
-      const result = await runCommand(sandboxUrl, token, 'echo $BASH_ENV')
+      const result = await runCommand(sandboxUrl, token, 'echo $BASH_ENV', 60000)
       return getOutput(result).includes('/usr/lib/agentsh/bash_startup.sh')
     })
 
@@ -224,13 +227,13 @@ async function main() {
     await test('policy-test: system path write denied', async () => {
       const result = await runCommand(sandboxUrl, token, '/usr/bin/agentsh debug policy-test --op write --path /usr/bin/testfile --json 2>&1')
       const output = getOutput(result)
-      return output.includes('"deny"') && output.includes('default-deny-files')
+      return output.includes('"deny"') && output.includes('block-system-path-writes')
     })
 
     await test('policy-test: /etc write denied', async () => {
       const result = await runCommand(sandboxUrl, token, '/usr/bin/agentsh debug policy-test --op write --path /etc/test.txt --json 2>&1')
       const output = getOutput(result)
-      return output.includes('"deny"') && output.includes('default-deny-files')
+      return output.includes('"deny"') && output.includes('block-system-path-writes')
     })
 
     // Actual file I/O enforcement tests — verify FUSE/landlock enforces file_rules

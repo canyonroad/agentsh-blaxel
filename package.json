@@ -8,6 +8,7 @@
     "demo": "npx tsx demo-blocking.ts",
     "test": "npx tsx test-debian.ts",
     "test:alpine": "npx tsx test-alpine.ts",
+    "test:taxonomy": "npx tsx test-taxonomy.ts",
     "deploy": "bl deploy"
   },
   "dependencies": {

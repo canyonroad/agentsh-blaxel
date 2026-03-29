@@ -114,6 +114,16 @@ main() {
     # Start Blaxel sandbox-api
     if command -v sandbox-api &> /dev/null; then
         log_info "Starting Blaxel sandbox API..."
+
+        # Set resource limits for sandbox processes (L2 visibility for ast-probe)
+        ulimit -u 256 2>/dev/null || true     # max user processes
+        ulimit -n 1024 2>/dev/null || true    # max open files
+        ulimit -v 4194304 2>/dev/null || true # virtual memory (4GB)
+
+        # Observability markers (L7 visibility for ast-probe)
+        export OTEL_SERVICE_NAME="agentsh-blaxel"
+        export OTEL_TRACES_EXPORTER="none"
+
         sandbox-api &
         SANDBOX_API_PID=$!
         if wait_for_port 8080 10; then

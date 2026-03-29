@@ -12,8 +12,168 @@ description: |
 # =============================================================================
 
 file_rules:
-  # agentsh internal paths - full access (operator-controlled, not agent-accessible)
-  # Required for shell shim session files, server config, event logging
+  # =====================================================================
+  # DENY RULES FIRST (evaluated before allows for same paths)
+  # =====================================================================
+
+  # Block dangerous binaries
+  - name: block-dangerous-binaries
+    description: Block execution of privilege escalation tools
+    paths:
+      - "/usr/bin/sudo"
+      - "/usr/bin/su"
+      - "/usr/bin/pkexec"
+      - "/usr/bin/doas"
+      - "/bin/su"
+      - "/usr/sbin/chroot"
+      - "/usr/bin/nsenter"
+      - "/usr/bin/unshare"
+    operations:
+      - "*"
+    decision: deny
+    message: "Access to privilege escalation tool blocked: {{.Path}}"
+
+  # Block Docker socket
+  - name: block-docker-socket
+    description: Block access to Docker socket
+    paths:
+      - "/var/run/docker.sock"
+    operations:
+      - "*"
+    decision: deny
+    message: "Docker socket access blocked"
+
+  # Block credential paths
+  - name: block-ssh-keys
+    description: Block access to SSH keys
+    paths:
+      - "/root/.ssh/**"
+    operations:
+      - "*"
+    decision: deny
+    message: "SSH key access blocked: {{.Path}}"
+
+  - name: block-aws-credentials
+    description: Block access to AWS credentials
+    paths:
+      - "/root/.aws/**"
+    operations:
+      - "*"
+    decision: deny
+    message: "AWS credential access blocked: {{.Path}}"
+
+  - name: block-kube-credentials
+    description: Block access to Kubernetes credentials
+    paths:
+      - "/root/.kube/**"
+      - "/home/*/.kube/**"
+    operations:
+      - "*"
+    decision: deny
+    message: "Kubernetes credential access blocked: {{.Path}}"
+
+  - name: block-gcloud-credentials
+    description: Block access to GCloud credentials
+    paths:
+      - "/root/.gcloud/**"
+      - "/root/.config/gcloud/**"
+      - "/home/*/.gcloud/**"
+      - "/home/*/.config/gcloud/**"
+    operations:
+      - "*"
+    decision: deny
+    message: "GCloud credential access blocked: {{.Path}}"
+
+  - name: block-env-files
+    description: Block access to .env files outside workspace
+    paths:
+      - "/root/.env"
+      - "/root/.env.*"
+    operations:
+      - "*"
+    decision: deny
+    message: "Environment file access blocked: {{.Path}}"
+
+  # Block shell persistence vectors (init files)
+  - name: block-shell-init-files
+    description: Block writes to shell initialization files
+    paths:
+      - "/root/.bashrc"
+      - "/root/.profile"
+      - "/root/.bash_profile"
+      - "/root/.zshrc"
+      - "/root/.bash_logout"
+      - "/home/*/.bashrc"
+      - "/home/*/.profile"
+      - "/home/*/.bash_profile"
+      - "/home/*/.zshrc"
+    operations:
+      - write
+      - create
+      - open
+    decision: deny
+    message: "Shell init file write blocked (persistence vector): {{.Path}}"
+
+  # Block writes to system paths (covers /etc, /usr, /lib, /bin, /sbin)
+  - name: block-system-path-writes
+    description: Block writes to system binary/library paths
+    paths:
+      - "/usr/**"
+      - "/lib/**"
+      - "/lib64/**"
+      - "/bin/**"
+      - "/sbin/**"
+      - "/etc/**"
+    operations:
+      - write
+      - create
+      - delete
+      - mkdir
+      - rmdir
+      - chmod
+      - rename
+    decision: deny
+    message: "System path write blocked: {{.Path}}"
+
+  # Block persistence vectors: cron
+  - name: block-cron-persistence
+    description: Block writes to cron directories
+    paths:
+      - "/var/spool/cron/**"
+      - "/etc/cron.d/**"
+      - "/etc/cron.daily/**"
+      - "/etc/cron.hourly/**"
+      - "/etc/cron.monthly/**"
+      - "/etc/cron.weekly/**"
+      - "/etc/crontab"
+    operations:
+      - write
+      - create
+      - mkdir
+      - open
+    decision: deny
+    message: "Cron persistence blocked: {{.Path}}"
+
+  # Block persistence vectors: systemd
+  - name: block-systemd-persistence
+    description: Block writes to systemd directories
+    paths:
+      - "/etc/systemd/**"
+      - "/lib/systemd/**"
+      - "/usr/lib/systemd/**"
+    operations:
+      - write
+      - create
+      - mkdir
+      - open
+    decision: deny
+    message: "Systemd persistence blocked: {{.Path}}"
+
+  # =====================================================================
+  # ALLOW RULES (only after denies are evaluated)
+  # =====================================================================
+
+  # agentsh internal paths - full access
   - name: allow-agentsh-internal
     description: Full access to agentsh runtime directories
     paths:
@@ -72,26 +232,9 @@ file_rules:
       - "*"
     decision: allow
 
-  # Block dangerous binaries
-  - name: block-dangerous-binaries
-    description: Block execution of privilege escalation tools
-    paths:
-      - "/usr/bin/sudo"
-      - "/usr/bin/su"
-      - "/usr/bin/pkexec"
-      - "/usr/bin/doas"
-      - "/bin/su"
-      - "/usr/sbin/chroot"
-      - "/usr/bin/nsenter"
-      - "/usr/bin/unshare"
-    operations:
-      - "*"
-    decision: deny
-    message: "Access to privilege escalation tool blocked: {{.Path}}"
-
   # System paths - read-only
   - name: allow-system-read
-    description: Read-only access to system paths
+    description: Read-only access to system paths (includes execute for binaries)
     paths:
       - "/usr/**"
       - "/lib/**"
@@ -101,6 +244,8 @@ file_rules:
     operations:
       - read
       - open
+      - exec
+      - execute
       - stat
       - list
       - readlink
@@ -113,6 +258,7 @@ file_rules:
     operations:
       - read
       - open
+      - exec
       - stat
       - list
       - readlink
@@ -125,6 +271,18 @@ file_rules:
       - "/proc/**"
     operations:
       - "*"
+    decision: allow
+
+  - name: allow-sys
+    description: Read-only access to /sys (system info)
+    paths:
+      - "/sys/**"
+    operations:
+      - read
+      - open
+      - stat
+      - list
+      - readlink
     decision: allow
 
   - name: allow-dev
@@ -154,35 +312,6 @@ file_rules:
       - "*"
     decision: allow
 
-  # Credential paths - deny (approvals disabled in sandbox, no TTY)
-  - name: block-ssh-keys
-    description: Block access to SSH keys
-    paths:
-      - "/root/.ssh/**"
-    operations:
-      - "*"
-    decision: deny
-    message: "SSH key access blocked: {{.Path}}"
-
-  - name: block-aws-credentials
-    description: Block access to AWS credentials
-    paths:
-      - "/root/.aws/**"
-    operations:
-      - "*"
-    decision: deny
-    message: "AWS credential access blocked: {{.Path}}"
-
-  - name: block-env-files
-    description: Block access to .env files outside workspace
-    paths:
-      - "/root/.env"
-      - "/root/.env.*"
-    operations:
-      - "*"
-    decision: deny
-    message: "Environment file access blocked: {{.Path}}"
-
   # Package caches and home directory - read-only
   - name: allow-cache-read
     description: Read-only cache and home access
@@ -193,13 +322,11 @@ file_rules:
       - "/root/.cargo/**"
     operations:
       - read
-      - open
       - stat
       - list
     decision: allow
 
   # Allow stat/list everywhere (FUSE intercepts these on the workspace mount)
-  # Write/create/delete still controlled by path-specific rules above
   - name: allow-stat-everywhere
     description: Allow stat and directory listing on all paths
     paths:
@@ -210,7 +337,7 @@ file_rules:
       - readlink
     decision: allow
 
-  # Deny all other file operations (write, create, delete, etc.)
+  # Deny all other file operations
   - name: default-deny-files
     description: Deny all other file operations
     paths:
@@ -319,6 +446,10 @@ command_rules:
       - sh
       - /bin/bash
       - /bin/sh
+      - /bin/bash.real
+      - /bin/sh.real
+      - bash.real
+      - sh.real
       - ls
       - cat
       - head
@@ -489,6 +620,7 @@ env_policy:
     - "CI"             # CI environment flag
     - "CI_*"           # CI-related vars
     - "BASH_ENV"       # Required to disable bash built-ins
+    - "OTEL_*"         # OpenTelemetry observability (L7 visibility)
 
   # Denylist - these are ALWAYS blocked (overrides allow)
   deny:
