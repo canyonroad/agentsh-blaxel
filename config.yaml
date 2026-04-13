@@ -1,5 +1,5 @@
 # agentsh Server Configuration for Blaxel Sandbox
-# Optimized for containerized AI agent environments (v0.16.9)
+# Optimized for containerized AI agent environments (v0.18.0)
 
 # Security settings from agentsh detect
 security:
@@ -101,6 +101,8 @@ sandbox:
 policies:
   dir: "/etc/agentsh/policies"
   default: "default"
+  allowed:
+    - "default"
 
 # =============================================================================
 # APPROVALS

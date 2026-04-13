@@ -278,13 +278,13 @@ async function main() {
     await test('policy-test: system path write denied', async () => {
       const result = await runCommand(sandboxUrl, token, '/usr/local/bin/agentsh debug policy-test --op write --path /usr/bin/testfile --json 2>&1')
       const output = getOutput(result)
-      return output.includes('"deny"') && output.includes('default-deny-files')
+      return output.includes('"deny"') && output.includes('block-system-path-writes')
     })
 
     await test('policy-test: /etc write denied', async () => {
       const result = await runCommand(sandboxUrl, token, '/usr/local/bin/agentsh debug policy-test --op write --path /etc/test.txt --json 2>&1')
       const output = getOutput(result)
-      return output.includes('"deny"') && output.includes('default-deny-files')
+      return output.includes('"deny"') && output.includes('block-system-path-writes')
     })
 
     await test('policy-test: stat everywhere allowed', async () => {

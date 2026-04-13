@@ -21,7 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Set agentsh version (use latest stable)
-ARG AGENTSH_VERSION=0.16.9
+ARG AGENTSH_VERSION=0.18.0
 # Cache bust to force re-download of updated release
 ARG AGENTSH_CACHE_BUST=9
 
@@ -145,6 +145,7 @@ RUN agentsh shim install-shell \
     --root / \
     --shim /usr/bin/agentsh-shell-shim \
     --bash \
+    --force \
     --i-understand-this-modifies-the-host && \
     chmod +x /bin/sh.real /bin/bash.real 2>/dev/null || true
 
