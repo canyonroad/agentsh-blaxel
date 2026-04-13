@@ -1,6 +1,6 @@
 # agentsh + Blaxel
 
-Runtime security governance for AI agents using [agentsh](https://github.com/canyonroad/agentsh) v0.16.9 with [Blaxel](https://blaxel.ai) sandboxes.
+Runtime security governance for AI agents using [agentsh](https://github.com/canyonroad/agentsh) v0.18.0 with [Blaxel](https://blaxel.ai) sandboxes.
 
 ## Why agentsh + Blaxel?
 
@@ -72,7 +72,7 @@ npx tsx test-debian.ts
 npx tsx test-taxonomy.ts
 ```
 
-**Alpine variant:** An Alpine Linux variant is available with full security parity and smaller image sizes (~200MB vs ~450MB, amd64 only). Run `npx tsx test-alpine.ts` to auto-deploy and test it.
+**Alpine variant:** An Alpine Linux variant is available with full security parity and smaller image sizes (~200MB vs ~450MB). The `0.18.0` musl release supports both `amd64` and `arm64`. Run `npx tsx test-alpine.ts` to auto-deploy and test it.
 
 ## How It Works
 
@@ -141,6 +141,46 @@ npx tsx test-debian.ts    # Debian test suite (30 tests)
 npx tsx test-alpine.ts    # Alpine test suite (32 tests, auto-deploys)
 npx tsx test-taxonomy.ts  # AST benchmark (18/28, 64%)
 ```
+
+## Current Blaxel Protection Level
+
+On the current Blaxel runtime, `agentsh detect` reports the same result for both Debian and Alpine sandboxes:
+
+```text
+Security Mode:    minimal
+Protection Score: 50/100
+```
+
+That means the policy layer in this repo is working, but the runtime is not yet exposing the Linux primitives that let agentsh move into stronger kernel-enforced modes. The main gaps observed on Blaxel are:
+
+- No `cgroups v2`, so agentsh cannot enforce resource limits and cannot attach its stronger network controls
+- No `eBPF` support, so there is no kernel-level connection tracking or network policy backend
+- No PID namespace isolation, so processes still share the host namespace view
+- Full capability sets retained, so the container is not starting from a least-privilege baseline
+
+The AST benchmark on the current Blaxel runtime scores `18/28 (64%)` on both Debian and Alpine, which lines up with the `minimal` detect result.
+
+## Blaxel Hardening Guide
+
+If Blaxel engineering wants stronger protection with agentsh, these are the highest-value runtime changes to add or enable:
+
+- Enable `cgroups v2`. This is the biggest missing primitive because it unlocks agentsh resource controls and is a prerequisite for stronger network enforcement.
+- Expose `seccomp user-notify` support in the sandbox runtime. That lets agentsh use its full seccomp enforcement path instead of falling back to the current minimal posture.
+- Expose `eBPF` support with the required capabilities. That is the path to kernel-level network visibility and policy enforcement.
+- Add PID namespace isolation for sandbox workloads so processes do not share the host PID namespace.
+- Drop Linux capabilities by default and keep only the minimum set required. If ptrace mode is needed as a fallback, grant only `SYS_PTRACE` rather than leaving the full bounding set available.
+- Support kernel `6.7+` / Landlock ABI v4 if Blaxel wants TCP connect/bind restrictions without relying entirely on eBPF.
+- Run the workload as a non-root user where possible, and tighten exposure of `/proc` and sensitive system files such as `/etc/shadow`, `/etc/sudoers`, `/proc/1/root`, and `/proc/sysrq-trigger`.
+- Block raw socket creation unless the sandbox explicitly needs it.
+- Route outbound LLM and API traffic through the agentsh proxy and declare `http_services` so external access is governed consistently in every security mode.
+
+### Networking Note
+
+Ptrace can improve network enforcement only as its own fallback mode. It is not an extra networking layer that can be stacked on top of the current seccomp path in agentsh `0.18.0`.
+
+- If Blaxel adds `SYS_PTRACE` but not seccomp user-notify, agentsh can run in `ptrace` mode and intercept `connect` / `bind` syscalls.
+- That is still weaker than full seccomp + eBPF mode, and ptrace DNS/SNI interception remains best-effort rather than a hard security boundary.
+- For the strongest network protections, the right target for Blaxel is `cgroups v2` + `eBPF`, with seccomp user-notify enabled.
 
 ## Related Projects
 
