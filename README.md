@@ -1,6 +1,6 @@
 # agentsh + Blaxel
 
-Runtime security governance for AI agents using [agentsh](https://github.com/canyonroad/agentsh) v0.18.0 with [Blaxel](https://blaxel.ai) sandboxes.
+Runtime security governance for AI agents using [agentsh](https://github.com/canyonroad/agentsh) v0.18.3 with [Blaxel](https://blaxel.ai) sandboxes.
 
 ## Why agentsh + Blaxel?
 
@@ -72,7 +72,7 @@ npx tsx test-debian.ts
 npx tsx test-taxonomy.ts
 ```
 
-**Alpine variant:** An Alpine Linux variant is available with full security parity and smaller image sizes (~200MB vs ~450MB). The `0.18.0` musl release supports both `amd64` and `arm64`. Run `npx tsx test-alpine.ts` to auto-deploy and test it.
+**Alpine variant:** An Alpine Linux variant is available with full security parity and smaller image sizes (~200MB vs ~450MB). The `0.18.3` musl release supports both `amd64` and `arm64`. Run `npx tsx test-alpine.ts` to auto-deploy and test it.
 
 ## How It Works
 
@@ -139,7 +139,7 @@ agentsh-blaxel/
 ```bash
 npx tsx test-debian.ts    # Debian test suite (30 tests)
 npx tsx test-alpine.ts    # Alpine test suite (32 tests, auto-deploys)
-npx tsx test-taxonomy.ts  # AST benchmark (18/28, 64%)
+npx tsx test-taxonomy.ts  # AST benchmark (15/28, 54%)
 ```
 
 ## Current Blaxel Protection Level
@@ -158,7 +158,7 @@ That means the policy layer in this repo is working, but the runtime is not yet 
 - No PID namespace isolation, so processes still share the host namespace view
 - Full capability sets retained, so the container is not starting from a least-privilege baseline
 
-The AST benchmark on the current Blaxel runtime scores `18/28 (64%)` on both Debian and Alpine, which lines up with the `minimal` detect result.
+The AST benchmark on the current Blaxel runtime scores `15/28 (54%)`, which lines up with the `minimal` detect result.
 
 ## Blaxel Hardening Guide
 
@@ -176,7 +176,7 @@ If Blaxel engineering wants stronger protection with agentsh, these are the high
 
 ### Networking Note
 
-Ptrace can improve network enforcement only as its own fallback mode. It is not an extra networking layer that can be stacked on top of the current seccomp path in agentsh `0.18.0`.
+Ptrace can improve network enforcement only as its own fallback mode. It is not an extra networking layer that can be stacked on top of the current seccomp path in agentsh `0.18.3`.
 
 - If Blaxel adds `SYS_PTRACE` but not seccomp user-notify, agentsh can run in `ptrace` mode and intercept `connect` / `bind` syscalls.
 - That is still weaker than full seccomp + eBPF mode, and ptrace DNS/SNI interception remains best-effort rather than a hard security boundary.

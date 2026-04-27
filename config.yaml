@@ -1,5 +1,5 @@
 # agentsh Server Configuration for Blaxel Sandbox
-# Optimized for containerized AI agent environments (v0.18.0)
+# Optimized for containerized AI agent environments (v0.18.3)
 
 # Security settings from agentsh detect
 security:
@@ -82,10 +82,21 @@ sandbox:
       on_block: "errno"
     execve:
       enabled: true
+      # Debian .deb installs agentsh under /usr/bin, while tarball/musl
+      # installs use /usr/local/bin. Bypass both internal tool locations so
+      # seccomp execve interception never traps agentsh's own control path.
+      internal_bypass:
+        - "/usr/bin/agentsh"
+        - "/usr/bin/agentsh-unixwrap"
+        - "/usr/local/bin/agentsh"
+        - "/usr/local/bin/agentsh-unixwrap"
     # File I/O interception via seccomp-notify
     file_monitor:
-      enabled: true
-      enforce_without_fuse: true
+      # FUSE is the primary file policy layer in this Blaxel integration.
+      # Keep the seccomp file monitor off; on Alpine/musl under Blaxel
+      # v0.18.3 it can leave the agentsh server unresponsive mid-suite.
+      enabled: false
+      enforce_without_fuse: false
       intercept_metadata: false
 
   # Resource limits enforced at sandbox level

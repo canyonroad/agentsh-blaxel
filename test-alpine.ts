@@ -76,15 +76,13 @@ async function main() {
     console.log('\n=== Test Suite: Alpine Environment ===')
 
     await test('Alpine Linux detected', async () => {
-      const result = await runCommand(sandboxUrl, token, 'cat /etc/os-release | grep -i alpine')
+      const result = await runCommand(sandboxUrl, token, 'cat /etc/os-release')
       return getOutput(result).toLowerCase().includes('alpine')
     })
 
     await test('musl libc detected', async () => {
-      const result = await runCommand(sandboxUrl, token, 'ldd --version 2>&1 | head -1')
-      const output = getOutput(result)
-      const stderr = (result.stderr || result.logs || '').trim()
-      return output.includes('musl') || stderr.includes('musl')
+      const result = await runCommand(sandboxUrl, token, 'node -p \'process.report.getReport().header.glibcVersionRuntime||"musl"\'')
+      return getOutput(result).includes('musl')
     })
 
     // Test Suite 2: agentsh Installation
@@ -99,19 +97,23 @@ async function main() {
     })
 
     await test('static musl build (no dynamic libseccomp)', async () => {
-      // Alpine doesn't have 'file' command; check that the binary isn't dynamically linked to libseccomp
-      const result = await runCommand(sandboxUrl, token, 'ldd /usr/local/bin/agentsh 2>&1 || echo "static"')
+      // Alpine doesn't have 'file' command. Check the binary does not carry a
+      // dynamic libseccomp dependency string; the musl release statically links it.
+      const result = await runCommand(
+        sandboxUrl,
+        token,
+        'node -e \'const fs=require("fs");const b=fs.readFileSync("/usr/local/bin/agentsh");process.stdout.write(b.includes(Buffer.from("libseccomp.so"))?"dynamic-libseccomp":"static-musl")\''
+      )
       const output = getOutput(result)
-      console.log(`\n    Binary type: ${output.split('\n')[0]}`)
-      // musl static build: ldd says "not a dynamic executable" or "statically linked"
-      return output.includes('not a dynamic') || output.includes('statically linked') || output.includes('static')
+      console.log(`\n    Binary type: ${output}`)
+      return result.exitCode === 0 && output.includes('static-musl')
     })
 
     // Test Suite 3: Server Health
     console.log('\n=== Test Suite: Server Health ===')
 
     await test('agentsh server healthy', async () => {
-      const result = await runCommand(sandboxUrl, token, 'curl -s http://127.0.0.1:18080/health')
+      const result = await runCommand(sandboxUrl, token, "curl -s 'http://127.0.0.1:18080/health'")
       return getOutput(result) === 'ok'
     })
 
@@ -168,7 +170,7 @@ async function main() {
       const result = await runCommand(sandboxUrl, token, '/bin/kill -9 99999')
       if (result.exitCode === 126) return true
       // Fallback: verify policy evaluator correctly denies kill
-      const policyResult = await runCommand(sandboxUrl, token, '/usr/local/bin/agentsh debug policy-test --op exec --path kill 2>&1')
+      const policyResult = await runCommand(sandboxUrl, token, '/usr/local/bin/agentsh debug policy-test --op exec --path kill')
       const output = getOutput(policyResult)
       if (output.includes('DENY') && output.includes('block-system-commands')) {
         console.log(`\n    [known issue: BusyBox multicall bypass, policy correctly denies]`)
@@ -178,7 +180,8 @@ async function main() {
     })
 
     await test('rm -rf blocked (exit 126 or policy-deny)', async () => {
-      await runCommand(sandboxUrl, token, 'mkdir -p /tmp/testdir && touch /tmp/testdir/f.txt')
+      await runCommand(sandboxUrl, token, 'mkdir -p /tmp/testdir')
+      await runCommand(sandboxUrl, token, 'touch /tmp/testdir/f.txt')
       const result = await runCommand(sandboxUrl, token, '/bin/rm -rf /tmp/testdir')
       if (result.exitCode === 126) return true
       // Known issue: coreutils multicall binary not unwrapped correctly.
@@ -197,12 +200,12 @@ async function main() {
     console.log('\n=== Test Suite: Network Policy ===')
 
     await test('allowed domain (github.com)', async () => {
-      const result = await runCommand(sandboxUrl, token, 'curl -s --connect-timeout 5 -o /dev/null -w "%{http_code}" https://api.github.com/')
+      const result = await runCommand(sandboxUrl, token, "curl -s --connect-timeout 5 -o /dev/null -w '%{http_code}' 'https://api.github.com/'")
       return getOutput(result) === '200'
     })
 
     await test('metadata endpoint blocked', async () => {
-      const result = await runCommand(sandboxUrl, token, 'curl -s --connect-timeout 3 http://169.254.169.254/ 2>&1')
+      const result = await runCommand(sandboxUrl, token, "curl -s --connect-timeout 3 'http://169.254.169.254/'")
       return result.exitCode !== 0 || getOutput(result) === ''
     })
 
@@ -210,18 +213,18 @@ async function main() {
     console.log('\n=== Test Suite: Environment Policy ===')
 
     await test('env filtered to safe vars only', async () => {
-      const result = await runCommand(sandboxUrl, token, 'env | sort')
+      const result = await runCommand(sandboxUrl, token, 'env')
       const output = getOutput(result)
       const blocked = ['AWS_', 'AZURE_', 'GOOGLE_', 'OPENAI_', 'ANTHROPIC_', 'LD_PRELOAD', 'LD_LIBRARY_PATH']
       for (const prefix of blocked) {
-        if (output.includes(prefix)) return false
+        if (output.split('\n').some(line => line.startsWith(prefix))) return false
       }
       return output.includes('HOME=') && output.includes('PATH=')
     })
 
     await test('BASH_ENV passed through', async () => {
-      const result = await runCommand(sandboxUrl, token, 'echo $BASH_ENV')
-      return getOutput(result).includes('/usr/lib/agentsh/bash_startup.sh')
+      const result = await runCommand(sandboxUrl, token, 'env')
+      return getOutput(result).split('\n').includes('BASH_ENV=/usr/lib/agentsh/bash_startup.sh')
     })
 
     await test('policy-test: sudo denied', async () => {

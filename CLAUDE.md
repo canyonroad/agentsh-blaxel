@@ -41,9 +41,9 @@ bl delete sandbox agentsh-blaxel  # Clean up
 ## Current Blaxel Protection Posture
 
 - `agentsh detect` reports `Security Mode: minimal` and `Protection Score: 50/100` on both Debian and Alpine Blaxel sandboxes
-- AST currently scores `18/28 (64%)` on both Debian and Alpine
+- AST currently scores `15/28 (54%)`
 - The main runtime gaps are: no `cgroups v2`, no `eBPF`, no PID namespace isolation, and no effective capability drop
-- There is no general ptrace + seccomp hybrid for extra networking protection in agentsh `0.18.0`; ptrace is a separate fallback mode, not an additive network layer
+- There is no general ptrace + seccomp hybrid for extra networking protection in agentsh `0.18.3`; ptrace is a separate fallback mode, not an additive network layer
 
 **What Blaxel would need to add for stronger agentsh protection:**
 - `cgroups v2`
@@ -58,7 +58,8 @@ bl delete sandbox agentsh-blaxel  # Clean up
 
 ## Version History
 
-- **0.18.0** (current) - External secrets + unified `http_services`, audit HMAC-chain tamper evidence, seccomp/ptrace/cgroup/Landlock fixes, and musl arm64 release assets. This repo now installs the shell shim with `--force` so `/etc/agentsh/shim.conf` persists non-interactive enforcement, while the entrypoint still pre-creates a session for sandbox-api.
+- **0.18.3** (current) - Latest agentsh patch release for this repo.
+- **0.18.0** - External secrets + unified `http_services`, audit HMAC-chain tamper evidence, seccomp/ptrace/cgroup/Landlock fixes, and musl arm64 release assets. This repo now installs the shell shim with `--force` so `/etc/agentsh/shim.conf` persists non-interactive enforcement, while the entrypoint still pre-creates a session for sandbox-api.
 - **0.16.9** - Improved seccomp file_monitor: properly blocks openat(O_WRONLY) on protected files, /proc/mem fallback for path resolution, LD_PRELOAD ptracer for child processes under Yama. Known issues: (1) `intercept_metadata: true` breaks shell shim by blocking stat on `/bin/sh.real` during exec.LookPath -- must use `intercept_metadata: false`. (2) Session instability under rapid sequential commands (PR_SET_PTRACER fails under Yama, ProcessVMReadv fallback may deadlock after several exec calls). AST score: 18/28 (64%) with L5:4 structural credential isolation.
 - **0.16.8** - Stability and cross-platform fixes. Adds `/etc/agentsh/shim.conf` for enforcing policies in non-interactive environments (alternative to `AGENTSH_SHIM_FORCE`). Fixed argv0 handling for BusyBox/Alpine, removed all `syscall.Exec` from shim (uses piping), fixed daemon fd leak in sandbox toolboxes, fixed ptrace/seccomp deadlocks in hybrid mode. Stricter file I/O enforcement blocks `ldd` from reading binary files (test updated to use `ldconfig`). Multicall binary bypass on Alpine persists.
 - **0.16.7** - Hybrid ptrace-execve + seccomp wrapper mode for restricted environments. Async SQLite batching. Fixed notify handler goroutine leak (sessions unstable after ~10-15 exec calls). Fixed ptrace prefilter TSYNC for consistent thread filtering.
@@ -120,7 +121,7 @@ Alpine has **near-full security parity** with Debian. The shell shim works corre
 - Binary path: `/usr/local/bin/agentsh` (tar.gz install), not `/usr/bin/agentsh` (.deb install)
 - Shim install uses `--shim /usr/local/bin/agentsh-shell-shim` (not `/usr/bin/`)
 - musl build is statically linked with libseccomp (`CGO_ENABLED=1 CGO_LDFLAGS="-static -lseccomp"`)
-- Architecture: amd64 and arm64 musl builds are available in 0.18.0
+- Architecture: amd64 and arm64 musl builds are available in 0.18.3
 - `agentsh --version` shows "agentsh dev" (musl build doesn't embed version)
 - Requires `fuse3` apk package for FUSE file I/O enforcement
 - Requires `coreutils` apk for standalone binaries (reduces BusyBox multicall issues)
