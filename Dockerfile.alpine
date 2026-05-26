@@ -29,7 +29,7 @@ RUN apk add --no-cache \
     util-linux-misc
 
 # Set agentsh version (use latest stable)
-ARG AGENTSH_VERSION=0.18.3
+ARG AGENTSH_VERSION=0.20.2
 
 # Download and install agentsh (musl/Alpine version)
 RUN set -eux; \

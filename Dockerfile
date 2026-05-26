@@ -21,9 +21,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Set agentsh version (use latest stable)
-ARG AGENTSH_VERSION=0.18.3
+ARG AGENTSH_VERSION=0.20.2
 # Cache bust to force re-download of updated release
-ARG AGENTSH_CACHE_BUST=10
+ARG AGENTSH_CACHE_BUST=13
 
 # Download and install agentsh
 # Use .deb package for Debian-based systems, fall back to tar.gz

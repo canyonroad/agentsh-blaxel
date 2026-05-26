@@ -148,6 +148,18 @@ async function main() {
       return result.exitCode === 0 && getOutput(result).includes('bash-ok')
     })
 
+    await test('opaque sh -c runs under per-exec enforcement (shellc.opaque=enforce)', async () => {
+      // agentsh 0.20.2 (#378): opaque sh -c scripts (pipes, redirects, &&,
+      // $-expansion, globs) now run through the wrapped shell WITH per-exec
+      // interception instead of being denied. Safe scripts run; inner blocked
+      // commands are still enforced.
+      const safe = await runCommand(sandboxUrl, token, 'echo opaque | cat')
+      if (safe.exitCode !== 0 || !getOutput(safe).includes('opaque')) return false
+      const blocked = await runCommand(sandboxUrl, token, 'true && /usr/bin/sudo whoami')
+      console.log(`\n    safe pipe exit=${safe.exitCode}; blocked-in-script exit=${blocked.exitCode}`)
+      return blocked.exitCode === 126
+    })
+
     // Test Suite 6: Policy Enforcement (seccomp via shell shim)
     console.log('\n=== Test Suite: Policy Enforcement ===')
 
@@ -215,10 +227,16 @@ async function main() {
     await test('env filtered to safe vars only', async () => {
       const result = await runCommand(sandboxUrl, token, 'env')
       const output = getOutput(result)
+      const lines = output.split('\n')
       const blocked = ['AWS_', 'AZURE_', 'GOOGLE_', 'OPENAI_', 'ANTHROPIC_', 'LD_PRELOAD', 'LD_LIBRARY_PATH']
       for (const prefix of blocked) {
-        if (output.split('\n').some(line => line.startsWith(prefix))) return false
+        if (lines.some(line => line.startsWith(prefix))) return false
       }
+      // wrap_env_policy (0.20.2, PR #387) enforces the env_policy allowlist
+      // on wrapped commands: Blaxel's non-allowlisted BL_* metadata must be stripped.
+      const blKeys = lines.filter(l => l.startsWith('BL_')).map(l => l.split('=')[0])
+      console.log(`\n    env keys=${lines.filter(Boolean).length}; leaked BL_*=${blKeys.length ? blKeys.join(',') : 'none'}`)
+      if (blKeys.length > 0) return false
       return output.includes('HOME=') && output.includes('PATH=')
     })
 

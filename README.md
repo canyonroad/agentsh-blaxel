@@ -1,6 +1,6 @@
 # agentsh + Blaxel
 
-Runtime security governance for AI agents using [agentsh](https://github.com/canyonroad/agentsh) v0.18.3 with [Blaxel](https://blaxel.ai) sandboxes.
+Runtime security governance for AI agents using [agentsh](https://github.com/canyonroad/agentsh) v0.20.2 with [Blaxel](https://blaxel.ai) sandboxes.
 
 ## Why agentsh + Blaxel?
 
@@ -65,14 +65,14 @@ bl deploy
 # Run the policy enforcement demo
 npx tsx demo-blocking.ts
 
-# Run the full test suite (30 tests)
+# Run the full test suite (31 tests)
 npx tsx test-debian.ts
 
 # Run the Agent Sandbox Taxonomy (AST) benchmark
 npx tsx test-taxonomy.ts
 ```
 
-**Alpine variant:** An Alpine Linux variant is available with full security parity and smaller image sizes (~200MB vs ~450MB). The `0.18.3` musl release supports both `amd64` and `arm64`. Run `npx tsx test-alpine.ts` to auto-deploy and test it.
+**Alpine variant:** An Alpine Linux variant is available with full security parity and smaller image sizes (~200MB vs ~450MB). The `0.20.2` musl release supports both `amd64` and `arm64`. Run `npx tsx test-alpine.ts` to auto-deploy and test it.
 
 ## How It Works
 
@@ -102,6 +102,14 @@ sandbox-api runs: /bin/sh -c "sudo whoami"
 ```
 
 Every command that Blaxel's sandbox-api executes is automatically intercepted — no explicit `agentsh exec` calls needed.
+
+### agentsh 0.20.2 shim posture
+
+Since the 0.19.1 line, the shim installs kernel-level seccomp enforcement (the `unixwrap` path) rather than wrapping each command in `agentsh exec`. Two gaps that affected Blaxel (where `sandbox-api` always runs `/bin/sh -c "<command>"`) are fixed in 0.20.2 and used by this repo:
+
+- **Opaque shell scripts run under enforcement.** `sandbox.seccomp.shellc.opaque: enforce` (the 0.20.2 default, pinned in `config.yaml`) runs scripts the shim can't statically resolve — pipes (`|`), redirects (`2>&1`, `>`), `$`-expansion, `&&`/`;`, substitution, globs — through the wrapped shell with `execve` interception, so inner commands are still policy-checked. (On 0.20.1 these fail-closed with exit 126 / `shellc-opaque-script`.) Resolved by [#378](https://github.com/canyonroad/agentsh/issues/378).
+- **`env_inject` is applied on the unixwrap path again** ([#374](https://github.com/canyonroad/agentsh/issues/374)), so `BASH_ENV` is delivered via config `env_inject` (the 0.20.1 entrypoint export workaround was removed). See [CLAUDE.md](CLAUDE.md) for the full posture write-up.
+- **`env_policy` is enforced on wrapped commands** via `sandbox.wrap_env_policy.enabled` (PR #387). The wrap path previously leaked `sandbox-api`'s full environment; now only the `default.yaml` allow list reaches commands (`AGENTSH_*`, `BASH_ENV`, `OTEL_*`, `HOME`, `PATH`, …) and the deny list (`AWS_*`, `*_TOKEN`, `LD_*`, …) is stripped.
 
 ## Configuration
 
@@ -137,8 +145,8 @@ agentsh-blaxel/
 ## Testing
 
 ```bash
-npx tsx test-debian.ts    # Debian test suite (30 tests)
-npx tsx test-alpine.ts    # Alpine test suite (32 tests, auto-deploys)
+npx tsx test-debian.ts    # Debian test suite (31 tests)
+npx tsx test-alpine.ts    # Alpine test suite (33 tests, auto-deploys)
 npx tsx test-taxonomy.ts  # AST benchmark (15/28, 54%)
 ```
 
@@ -176,7 +184,7 @@ If Blaxel engineering wants stronger protection with agentsh, these are the high
 
 ### Networking Note
 
-Ptrace can improve network enforcement only as its own fallback mode. It is not an extra networking layer that can be stacked on top of the current seccomp path in agentsh `0.18.3`.
+Ptrace can improve network enforcement only as its own fallback mode. It is not an extra networking layer that can be stacked on top of the current seccomp path in agentsh `0.20.2`.
 
 - If Blaxel adds `SYS_PTRACE` but not seccomp user-notify, agentsh can run in `ptrace` mode and intercept `connect` / `bind` syscalls.
 - That is still weaker than full seccomp + eBPF mode, and ptrace DNS/SNI interception remains best-effort rather than a hard security boundary.

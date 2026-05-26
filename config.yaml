@@ -1,5 +1,5 @@
 # agentsh Server Configuration for Blaxel Sandbox
-# Optimized for containerized AI agent environments (v0.18.3)
+# Optimized for containerized AI agent environments (v0.20.2)
 
 # Security settings from agentsh detect
 security:
@@ -41,10 +41,25 @@ sandbox:
   # env_inject: Environment variables injected into all commands
   # These bypass env policy filtering (operator-trusted)
   # Primary use: BASH_ENV to disable bash builtins that bypass seccomp
+  #
+  # agentsh 0.20.2 (PR #380, fixes #374): env_inject is now applied on the
+  # wrap-init/kernel-install (unixwrap) shim path, so these reach executed
+  # commands again. (On 0.20.1 the unixwrap path ignored env_inject, which we
+  # had worked around with an entrypoint export — no longer needed.)
   env_inject:
     BASH_ENV: "/usr/lib/agentsh/bash_startup.sh"
     OTEL_SERVICE_NAME: "agentsh-blaxel"
     OTEL_TRACES_EXPORTER: "otlp"
+
+  # Enforce env_policy (allow/deny from default.yaml) on commands run through
+  # the wrap/unixwrap shim path (agentsh 0.20.2, PR #387 / #379). Opt-in;
+  # default off. Without it the wrap path leaks sandbox-api's full environment
+  # (BL_*, NODE_VERSION, …) into commands. With it, only the env_policy allow
+  # list passes (AGENTSH_*, BASH_ENV, OTEL_*, HOME, PATH, … are preserved) and
+  # the deny list (AWS_*, *_TOKEN, LD_*, …) is stripped — defense-in-depth.
+  # env_inject values above are operator-trusted and bypass this filtering.
+  wrap_env_policy:
+    enabled: true
 
   # FUSE filesystem interception (requires FUSE support)
   # Deferred: mount on first exec, not at startup. Survives container
@@ -77,6 +92,16 @@ sandbox:
   seccomp:
     enabled: true
     mode: "enforce"
+    # Opaque sh -c handling (agentsh 0.20.2, PR #386 / fixes #378).
+    # Blaxel's sandbox-api always runs `/bin/sh -c "<command>"`. "enforce" runs
+    # scripts the shim cannot statically resolve (pipes, redirects, $-expansion,
+    # &&, ;, globs) through the wrapped shell WITH per-exec interception, so the
+    # inner commands are still policy-checked. (0.20.1 had no knob and
+    # fail-closed every such script as shellc-opaque-script.)
+    # Values: deny (block) | enforce (run under per-exec policy) | allow (run, no enforcement).
+    # enforce is the 0.20.2 default; pinned here to document intent.
+    shellc:
+      opaque: enforce
     syscalls:
       default_action: "allow"
       on_block: "errno"
@@ -94,7 +119,7 @@ sandbox:
     file_monitor:
       # FUSE is the primary file policy layer in this Blaxel integration.
       # Keep the seccomp file monitor off; on Alpine/musl under Blaxel
-      # v0.18.3 it can leave the agentsh server unresponsive mid-suite.
+      # v0.20.2 it can leave the agentsh server unresponsive mid-suite.
       enabled: false
       enforce_without_fuse: false
       intercept_metadata: false
