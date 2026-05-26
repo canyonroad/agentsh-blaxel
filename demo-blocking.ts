@@ -125,8 +125,10 @@ async function main() {
   console.log('5. BLOCKED: Recursive Delete')
   console.log('='.repeat(60))
 
-  // Create test directory first
-  await runCommand(sandboxUrl, token, 'mkdir -p /tmp/test && touch /tmp/test/file.txt')
+  // Create test directory first (kept as separate commands for clarity; with
+  // shellc.opaque=enforce in 0.20.2, `a && b` would also run fine)
+  await runCommand(sandboxUrl, token, 'mkdir -p /tmp/test')
+  await runCommand(sandboxUrl, token, 'touch /tmp/test/file.txt')
 
   await testCommand('/bin/rm -rf /tmp/test', '/bin/rm -rf /tmp/test')
   await testCommand('/bin/rm -r /tmp/test', '/bin/rm -r /tmp/test')
@@ -135,8 +137,9 @@ async function main() {
   console.log('6. ALLOWED: Single File Delete')
   console.log('='.repeat(60))
 
-  // Create test file
-  await runCommand(sandboxUrl, token, 'mkdir -p /tmp/test && touch /tmp/test/file.txt')
+  // Create test file (separate commands — see note above)
+  await runCommand(sandboxUrl, token, 'mkdir -p /tmp/test')
+  await runCommand(sandboxUrl, token, 'touch /tmp/test/file.txt')
   await testCommand('rm /tmp/test/file.txt', 'rm /tmp/test/file.txt')
 
   // Show full audit trail

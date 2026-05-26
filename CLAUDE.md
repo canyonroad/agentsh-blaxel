@@ -24,13 +24,57 @@ The shell shim is the core integration mechanism. It replaces `/bin/sh` and `/bi
 3. Export `AGENTSH_SESSION_ID` and `AGENTSH_SHIM_FORCE=1` so sandbox-api inherits them
 This way the shim has a ready session and never needs to auto-create one.
 
+## agentsh 0.20.2 Shell-Shim Posture (kernel-install path)
+
+Starting in the 0.19.1 line, the shell shim installs kernel-level seccomp
+enforcement (the `unixwrap` path) instead of routing every command through
+`agentsh exec`. On Blaxel, `sandbox-api` always runs `/bin/sh -c "<command>"`
+and we do **not** control the invocation shape. The 0.19.1–0.20.1 unixwrap path
+had two gaps for this setup (filed as #374 and #378); both are fixed in
+0.20.2 and this repo is configured to use the fixes:
+
+1. **Opaque `sh -c` scripts run under per-exec enforcement** (`sandbox.seccomp.shellc.opaque: enforce`,
+   the 0.20.2 default; pinned in `config.yaml`). Scripts the shim cannot
+   statically resolve to a single command — pipes (`|`), redirects (`2>&1`, `>`),
+   variable expansion (`$VAR`), substitution, `;`, `&&`, globs — run through the
+   wrapped shell with `execve` interception, so **inner commands are still
+   policy-checked** (a blocked binary inside the script is denied). On 0.20.1
+   these all fail-closed as `shellc-opaque-script` (exit 126) with no knob.
+   Values: `deny` | `enforce` | `allow`. The `opaque sh -c runs under per-exec
+   enforcement` test in both suites verifies a safe pipe runs (exit 0) and a
+   blocked inner command is still denied (exit 126). Resolved by
+   [canyonroad/agentsh#378](https://github.com/canyonroad/agentsh/issues/378) (PR #386).
+
+2. **`sandbox.env_inject` is applied on the unixwrap path again** (PR #380), so
+   `BASH_ENV` (and the OTEL vars) reach executed commands via config `env_inject`.
+   The 0.20.1 entrypoint `BASH_ENV` export workaround was **removed** — config
+   `env_inject` is the mechanism again. Resolved by
+   [canyonroad/agentsh#374](https://github.com/canyonroad/agentsh/issues/374) (PR #380).
+
+`env_policy` (allow/deny) enforcement on the wrap path is **enabled** here via
+`sandbox.wrap_env_policy.enabled: true` (PR #387 / #379). Without it the wrap
+path leaked the full `sandbox-api` environment into commands (~40 vars incl.
+`BL_*`, `NODE_VERSION`, `HOST`, `PORT`); with it, only the `default.yaml`
+`env_policy` allow list passes (~20 vars: `AGENTSH_*`, `BASH_ENV`, `OTEL_*`,
+`HOME`, `PATH`, `PWD`, `TERM`) and the deny list (`AWS_*`, `*_TOKEN`, `LD_*`, …)
+is stripped — verified live (no `BL_*` leak; shim still works since `AGENTSH_*`
+is allowlisted). `env_inject` values are operator-trusted and bypass this filter.
+
+**Command-shell detail:** the shim's `/bin/sh` and `/bin/bash` are the shim
+binary; `/bin/sh.real` is **dash** on Debian and **bash** on Alpine
+(Dockerfile.alpine repoints `/bin/sh`→bash before shim install). Because dash
+ignores `BASH_ENV` and has no `enable` builtin, `bash_startup.sh`'s
+`enable -n kill` only hardens the bash path — the Debian `sh -c` (dash) builtin
+`kill` is not disabled by it. External `/bin/kill` is still blocked (exit 126)
+in both variants; only the in-shell builtin on the dash path is unaffected.
+
 ## Deploying and Testing
 
 ```bash
 bl deploy                    # Deploy Debian variant
 npx tsx demo-blocking.ts     # Policy enforcement demo
-npx tsx test-debian.ts     # Full test suite (30/30 pass)
-npx tsx test-alpine.ts       # Alpine test suite (32/32 pass, auto-deploys)
+npx tsx test-debian.ts     # Full test suite (31/31 pass)
+npx tsx test-alpine.ts       # Alpine test suite (33/33 pass, auto-deploys)
 bl delete sandbox agentsh-blaxel  # Clean up
 ```
 
@@ -43,7 +87,7 @@ bl delete sandbox agentsh-blaxel  # Clean up
 - `agentsh detect` reports `Security Mode: minimal` and `Protection Score: 50/100` on both Debian and Alpine Blaxel sandboxes
 - AST currently scores `15/28 (54%)`
 - The main runtime gaps are: no `cgroups v2`, no `eBPF`, no PID namespace isolation, and no effective capability drop
-- There is no general ptrace + seccomp hybrid for extra networking protection in agentsh `0.18.3`; ptrace is a separate fallback mode, not an additive network layer
+- There is no general ptrace + seccomp hybrid for extra networking protection in agentsh `0.20.2`; ptrace is a separate fallback mode, not an additive network layer
 
 **What Blaxel would need to add for stronger agentsh protection:**
 - `cgroups v2`
@@ -58,7 +102,13 @@ bl delete sandbox agentsh-blaxel  # Clean up
 
 ## Version History
 
-- **0.18.3** (current) - Latest agentsh patch release for this repo.
+- **0.20.2** (current) - Final release that fixes the two issues this repo filed against the 0.19.1+ kernel-install shim path. PR #380 (#374): `sandbox.env_inject` is applied again on the wrap-init/unixwrap path — so the entrypoint `BASH_ENV` export workaround was removed and config `env_inject` is the mechanism again. PR #386 (#378): new **`sandbox.seccomp.shellc.opaque`** knob (`deny`|`enforce`|`allow`); **default is now `enforce`**, so opaque `sh -c` scripts (pipes/redirects/`&&`/`$`-expansion/globs) run through the wrapped shell with per-exec interception instead of fail-closing. Also: PR #387 (#379) adds `env_policy` enforcement on the wrap path (**enabled here** via `sandbox.wrap_env_policy.enabled`), PR #384 allows `command -v/-V` introspection in the shell-c pre-check, PR #381 makes opaque pre-deny interception-aware, PR #385 stops blanket-denying commands from a symlinked cwd under `symlink_escape=deny`. Adds over rc1: PR #389/#392 improve seccomp capability detection (real NEW_LISTENER install probe + honest `detect`/SelectMode reporting) — no change to the Blaxel result (still `minimal`, AST 15/28).
+- **0.20.1** - Small maintenance release. FUSE symlink policy fix (#313: symlink leaf ops checked on the link, fixes Python-venv breakage), live `PolicyPush` from watchtower with signature/hash verification, `require_where` DB policy guard. **Breaking/operator-visible:** (1) `policies.symlink_escape` now defaults to `evaluate` (outside-root symlinks are evaluated against `file_rules` instead of an unconditional deny) — set `policies.symlink_escape: deny` to restore the prior hardened posture. (2) `audit.watchtower.agent_id` fallback now emits `<hostname>-<pid>` instead of bare hostname (not used in this repo — no watchtower config).
+- **0.20.0** - Full PostgreSQL access proxy (wire-level interception, classification, policy evaluation, redirect runtime). Sandboxing/wrap fixes for hosted runtimes (Vercel/Daytona/Firecracker), eBPF attach-only cgroup mode, FUSE correctness fixes. Fixed an rc1 regression (#361) where the shim engaged the wrapper despite `unix_sockets.enabled: false`.
+- **0.19.3** - Security mitigation for the "Dirty Frag" advisory: protocol-aware socket tuple rules and YAML mitigation sets. **Breaking:** `sandbox.seccomp.hardening_profiles` was removed; configs using it now fail with a migration message (this repo never used it — no impact).
+- **0.19.1** - Shim-installed kernel enforcement (#274: the shell shim installs the seccomp wrapper at the kernel layer, closing the SDK-driven-exec bypass; modes `auto`/`on`/`off`), shim wrap-init policy pre-check (#279), `argv[0]` preservation for busybox-multicall systems / Alpine (#280), `.real` suffix stripping in policy matching (#278), `unixwrap` PATH fallback (#277), cgroup writability probe before claiming nested mode.
+- **0.19.0** - Socket family blocking (#261: per-`AF_*` blocking on socket/socketpair via seccomp-bpf with ptrace fallback; default 12 families return `EAFNOSUPPORT`; both engines emit identical audit events). Experimental skillcheck (#259/#260) for scanning AI agent skill installations.
+- **0.18.3** - agentsh patch release; previous version for this repo.
 - **0.18.0** - External secrets + unified `http_services`, audit HMAC-chain tamper evidence, seccomp/ptrace/cgroup/Landlock fixes, and musl arm64 release assets. This repo now installs the shell shim with `--force` so `/etc/agentsh/shim.conf` persists non-interactive enforcement, while the entrypoint still pre-creates a session for sandbox-api.
 - **0.16.9** - Improved seccomp file_monitor: properly blocks openat(O_WRONLY) on protected files, /proc/mem fallback for path resolution, LD_PRELOAD ptracer for child processes under Yama. Known issues: (1) `intercept_metadata: true` breaks shell shim by blocking stat on `/bin/sh.real` during exec.LookPath -- must use `intercept_metadata: false`. (2) Session instability under rapid sequential commands (PR_SET_PTRACER fails under Yama, ProcessVMReadv fallback may deadlock after several exec calls). AST score: 18/28 (64%) with L5:4 structural credential isolation.
 - **0.16.8** - Stability and cross-platform fixes. Adds `/etc/agentsh/shim.conf` for enforcing policies in non-interactive environments (alternative to `AGENTSH_SHIM_FORCE`). Fixed argv0 handling for BusyBox/Alpine, removed all `syscall.Exec` from shim (uses piping), fixed daemon fd leak in sandbox toolboxes, fixed ptrace/seccomp deadlocks in hybrid mode. Stricter file I/O enforcement blocks `ldd` from reading binary files (test updated to use `ldconfig`). Multicall binary bypass on Alpine persists.
@@ -105,7 +155,7 @@ When querying APIs from inside the sandbox, use `/usr/bin/agentsh` (full path) t
 - `alpine/entrypoint.sh` — Uses `#!/bin/bash.real` (same as Debian). Pre-creates a session for sandbox-api; the shim itself is installed with `--force`.
 - `sandbox-utils.ts` — Shared sandbox API utilities (command exec, deploy helpers)
 - `demo-blocking.ts` — Runs commands directly through sandbox API, checks exit codes, queries events for rule names
-- `test-debian.ts` / `test-alpine.ts` — Full test suites (Debian 30 tests, Alpine 32 tests)
+- `test-debian.ts` / `test-alpine.ts` — Full test suites (Debian 31 tests, Alpine 33 tests)
 
 ## Alpine Notes
 
@@ -121,7 +171,7 @@ Alpine has **near-full security parity** with Debian. The shell shim works corre
 - Binary path: `/usr/local/bin/agentsh` (tar.gz install), not `/usr/bin/agentsh` (.deb install)
 - Shim install uses `--shim /usr/local/bin/agentsh-shell-shim` (not `/usr/bin/`)
 - musl build is statically linked with libseccomp (`CGO_ENABLED=1 CGO_LDFLAGS="-static -lseccomp"`)
-- Architecture: amd64 and arm64 musl builds are available in 0.18.3
+- Architecture: amd64 and arm64 musl builds are available in 0.20.2
 - `agentsh --version` shows "agentsh dev" (musl build doesn't embed version)
 - Requires `fuse3` apk package for FUSE file I/O enforcement
 - Requires `coreutils` apk for standalone binaries (reduces BusyBox multicall issues)
